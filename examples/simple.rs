@@ -1,66 +1,130 @@
+use async_trait::async_trait;
+use gpt::CommandDispatcher;
 
-use gpt::Aggregate;
+use gpt::{Aggregate, CqrsError, EventConsumer, EventStore, SimpleCommandDispatcher};
 
-
+// Aggregate
+#[derive(Default, Clone, Debug)]
 struct CounterState {
+    id: String,
     count: u32,
 }
 
-impl CounterState {
-    pub fn new(count: u32) -> Self {
-        CounterState { count }
-    }
-}
-
-enum CounterCommand {
-    Increment,
-    Decrement,
-}
-
-#[derive(PartialEq)]
-enum CounterEvent {
-    Incremented,
-    Decremented,
-}
-
+#[async_trait]
 impl Aggregate for CounterState {
     type Command = CounterCommand;
     type Event = CounterEvent;
 
-    fn handle(&self, command: &Self::Command) -> Vec<Self::Event> {
+    async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
+        // Lame example to apply checks and validations during command execution
+        if false {
+            return Err(CqrsError::new(format!("Command failed {:?}", command)));
+        }
         match command {
-            CounterCommand::Increment => vec![CounterEvent::Incremented],
-            CounterCommand::Decrement => vec![CounterEvent::Decremented],
+            CounterCommand::Increment(amount) => Ok(vec![CounterEvent::Incremented(*amount)]),
+            CounterCommand::Decrement(amount) => Ok(vec![CounterEvent::Decremented(*amount)]),
         }
     }
 
-
     fn apply(&mut self, event: &Self::Event) {
         match event {
-            CounterEvent::Incremented => self.count += 1,
-            CounterEvent::Decremented => self.count -= 1,
+            CounterEvent::Incremented(amount) => self.count += amount,
+            CounterEvent::Decremented(amount) => self.count -= amount,
         };
+    }
+
+    fn aggregate_id(&self) -> &str {
+        self.id.as_str()
     }
 }
 
-fn main() {
-    let mut counter = CounterState::new(0);
+// Commands
+#[derive(Debug, PartialEq, Clone)]
+enum CounterCommand {
+    Increment(u32),
+    Decrement(u32),
+}
 
-    println!("Counter initial: {}", counter.count);
+// Events
+#[derive(Debug, PartialEq, Clone)]
+enum CounterEvent {
+    Incremented(u32),
+    Decremented(u32),
+}
 
-    let events = counter.handle(&CounterCommand::Increment);
-    assert!(events.contains(&CounterEvent::Incremented));
-    for e in events.into_iter() {
-        counter.apply(&e);
+// Consumer
+struct PrintEventConsumer {}
+
+#[async_trait]
+impl EventConsumer for PrintEventConsumer {
+    type Event = CounterEvent;
+
+    async fn process<'a>(&self, event: &'a Self::Event) {
+        println!("Received event: {:?}", event);
     }
-    assert_eq!(counter.count, 1);
-    println!("Counter increment: {}", counter.count);
+}
 
-    let events = counter.handle(&CounterCommand::Decrement);
-    assert!(events.contains(&CounterEvent::Decremented));
-    for e in events.into_iter() {
-        counter.apply(&e);
+// Event Store
+use std::collections::HashMap;
+
+struct InMemoryEventStore {
+    events: HashMap<String, Vec<CounterEvent>>,
+}
+
+impl InMemoryEventStore {
+    pub fn new() -> Self {
+        InMemoryEventStore {
+            events: HashMap::new(),
+        }
     }
-    assert_eq!(counter.count, 0);
-    println!("Counter decrement: {}", counter.count);
+}
+
+#[async_trait]
+impl EventStore for InMemoryEventStore {
+    type Event = CounterEvent;
+
+    async fn save_events(
+        &mut self,
+        aggregate_id: &str,
+        events: &Vec<Self::Event>,
+    ) -> Result<(), CqrsError> {
+        self.events.insert(aggregate_id.to_string(), events.clone());
+        Ok(())
+    }
+
+    async fn load_events(&self, aggregate_id: &str) -> Result<Vec<Self::Event>, CqrsError> {
+        if let Some(events) = self.events.get(aggregate_id) {
+            Ok(events.to_vec())
+        } else {
+            Err(CqrsError::new(format!("No events for aggregate id `{}`", aggregate_id)))
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let store = InMemoryEventStore::new();
+    let consumers = vec![PrintEventConsumer {}];
+
+    let mut dispatcher: SimpleCommandDispatcher<
+        CounterState,
+        CounterCommand,
+        CounterEvent,
+        InMemoryEventStore,
+        PrintEventConsumer,
+    > = SimpleCommandDispatcher::new(store, consumers);
+
+    let result = dispatcher
+        .execute("12345", &CounterCommand::Increment(10))
+        .await?;
+    assert_eq!(result.count, 10);
+    println!("Counter state: {}", result.count);
+
+    let result = dispatcher
+        .execute("12345", &CounterCommand::Decrement(3))
+        .await?;
+    assert_eq!(result.count, 7);
+    println!("Counter state: {}", result.count);
+
+    Ok(())
 }
