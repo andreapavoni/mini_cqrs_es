@@ -67,6 +67,17 @@ impl EventConsumer for PrintEventConsumer {
     }
 }
 
+struct AnotherEventConsumer {}
+
+#[async_trait]
+impl EventConsumer for AnotherEventConsumer {
+    type Event = CounterEvent;
+
+    async fn process<'a>(&self, event: &'a Self::Event) {
+        println!("Received event at the other consumer: {:?}", event);
+    }
+}
+
 // Event Store
 
 struct InMemoryEventStore {
@@ -109,13 +120,13 @@ impl EventStore for InMemoryEventStore {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
-    let consumers = vec![PrintEventConsumer {}];
+    let consumers: Vec<Box<dyn EventConsumer<Event = CounterEvent>>> = vec![
+        Box::new(PrintEventConsumer {}),
+        Box::new(AnotherEventConsumer {}),
+    ];
 
-    let mut dispatcher: SimpleCommandDispatcher<
-        CounterState,
-        InMemoryEventStore,
-        PrintEventConsumer,
-    > = SimpleCommandDispatcher::new(store, consumers);
+    let mut dispatcher: SimpleCommandDispatcher<CounterState, InMemoryEventStore> =
+        SimpleCommandDispatcher::new(store, consumers);
 
     let result = dispatcher
         .execute("12345", &CounterCommand::Increment(10))

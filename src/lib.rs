@@ -48,7 +48,7 @@ pub trait Aggregate: Default + Sync + Send {
 
 // Event consumer
 #[async_trait]
-pub trait EventConsumer {
+pub trait EventConsumer: Sync + Send {
     type Event;
 
     async fn process<'a>(&self, event: &'a Self::Event);
@@ -69,33 +69,33 @@ pub trait EventStore {
 
 // Command dispatcher
 #[async_trait]
-pub trait CommandDispatcher<A, ES, EC>
+pub trait CommandDispatcher<A, ES>: Send
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
-    EC: EventConsumer<Event = A::Event>,
 {
     async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError>;
 }
 
-pub struct SimpleCommandDispatcher<A, ES, EC>
+pub struct SimpleCommandDispatcher<A, ES>
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
-    EC: EventConsumer<Event = A::Event>,
 {
     event_store: ES,
-    event_consumers: Vec<EC>,
+    event_consumers: Vec<Box<dyn EventConsumer<Event = A::Event>>>,
     marker: PhantomData<A>,
 }
 
-impl<A, ES, EC> SimpleCommandDispatcher<A, ES, EC>
+impl<A, ES> SimpleCommandDispatcher<A, ES>
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
-    EC: EventConsumer<Event = A::Event>,
 {
-    pub fn new(event_store: ES, event_consumers: Vec<EC>) -> Self {
+    pub fn new(
+        event_store: ES,
+        event_consumers: Vec<Box<dyn EventConsumer<Event = A::Event>>>,
+    ) -> Self {
         Self {
             event_store,
             event_consumers,
@@ -105,13 +105,12 @@ where
 }
 
 #[async_trait]
-impl<A, ES, EC> CommandDispatcher<A, ES, EC> for SimpleCommandDispatcher<A, ES, EC>
+impl<A, ES> CommandDispatcher<A, ES> for SimpleCommandDispatcher<A, ES>
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event> + std::marker::Send + std::marker::Sync,
     A::Command: Send + Sync,
     A::Event: Send + Sync,
-    EC: EventConsumer<Event = A::Event> + std::marker::Send + std::marker::Sync,
 {
     async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError> {
         let mut aggregate = match self.event_store.load_events(aggregate_id).await {
