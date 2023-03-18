@@ -1,7 +1,10 @@
-use async_trait::async_trait;
-use gpt::CommandDispatcher;
+use std::collections::HashMap;
 
-use gpt::{Aggregate, CqrsError, EventConsumer, EventStore, SimpleCommandDispatcher};
+use async_trait::async_trait;
+
+use mini_cqrs::{
+    Aggregate, CommandDispatcher, CqrsError, EventConsumer, EventStore, SimpleCommandDispatcher,
+};
 
 // Aggregate
 #[derive(Default, Clone, Debug)]
@@ -65,7 +68,6 @@ impl EventConsumer for PrintEventConsumer {
 }
 
 // Event Store
-use std::collections::HashMap;
 
 struct InMemoryEventStore {
     events: HashMap<String, Vec<CounterEvent>>,
@@ -96,7 +98,10 @@ impl EventStore for InMemoryEventStore {
         if let Some(events) = self.events.get(aggregate_id) {
             Ok(events.to_vec())
         } else {
-            Err(CqrsError::new(format!("No events for aggregate id `{}`", aggregate_id)))
+            Err(CqrsError::new(format!(
+                "No events for aggregate id `{}`",
+                aggregate_id
+            )))
         }
     }
 }
@@ -108,8 +113,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut dispatcher: SimpleCommandDispatcher<
         CounterState,
-        CounterCommand,
-        CounterEvent,
         InMemoryEventStore,
         PrintEventConsumer,
     > = SimpleCommandDispatcher::new(store, consumers);

@@ -1,3 +1,8 @@
+use std::{
+    fmt::{Display, Formatter},
+    marker::PhantomData,
+};
+
 use async_trait::async_trait;
 
 // Error
@@ -62,64 +67,53 @@ pub trait EventStore {
     async fn load_events(&self, aggregate_id: &str) -> Result<Vec<Self::Event>, CqrsError>;
 }
 
-use std::fmt::{Display, Formatter};
-
+// Command dispatcher
 #[async_trait]
-pub trait CommandDispatcher<A, C, E, ES, EC>
+pub trait CommandDispatcher<A, ES, EC>
 where
     A: Aggregate,
-    C: Send + Sync,
-    E: Send + Sync + Clone,
-    ES: EventStore<Event = E>,
-    EC: EventConsumer<Event = E>,
+    ES: EventStore<Event = A::Event>,
+    EC: EventConsumer<Event = A::Event>,
 {
-    async fn execute(&mut self, aggregate_id: &str, command: &C) -> Result<A, CqrsError>;
+    async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError>;
 }
 
-pub struct SimpleCommandDispatcher<A, C, E, ES, EC>
+pub struct SimpleCommandDispatcher<A, ES, EC>
 where
     A: Aggregate,
-    C: Send + Sync,
-    E: Send + Sync + Clone,
-    ES: EventStore<Event = E>,
-    EC: EventConsumer<Event = E>,
+    ES: EventStore<Event = A::Event>,
+    EC: EventConsumer<Event = A::Event>,
 {
     event_store: ES,
     event_consumers: Vec<EC>,
-    _marker_a: std::marker::PhantomData<A>,
-    _marker_c: std::marker::PhantomData<C>,
+    marker: PhantomData<A>,
 }
 
-impl<A, C, E, ES, EC> SimpleCommandDispatcher<A, C, E, ES, EC>
+impl<A, ES, EC> SimpleCommandDispatcher<A, ES, EC>
 where
     A: Aggregate,
-    C: Send + Sync,
-    E: Send + Sync + Clone,
-    ES: EventStore<Event = E>,
-    EC: EventConsumer<Event = E>,
+    ES: EventStore<Event = A::Event>,
+    EC: EventConsumer<Event = A::Event>,
 {
     pub fn new(event_store: ES, event_consumers: Vec<EC>) -> Self {
         Self {
             event_store,
             event_consumers,
-            _marker_a: std::marker::PhantomData,
-            _marker_c: std::marker::PhantomData,
+            marker: PhantomData,
         }
     }
 }
 
 #[async_trait]
-impl<A, C, E, ES, EC> CommandDispatcher<A, C, E, ES, EC>
-    for SimpleCommandDispatcher<A, C, E, ES, EC>
+impl<A, ES, EC> CommandDispatcher<A, ES, EC> for SimpleCommandDispatcher<A, ES, EC>
 where
-    A: Aggregate + Aggregate<Event = E> + Aggregate<Command = C>,
-    C: Send + Sync,
-    E: Send + Sync + Clone,
-    ES: EventStore<Event = E> + std::marker::Send + std::marker::Sync,
-
-    EC: EventConsumer<Event = E> + std::marker::Send + std::marker::Sync,
+    A: Aggregate,
+    ES: EventStore<Event = A::Event> + std::marker::Send + std::marker::Sync,
+    A::Command: Send + Sync,
+    A::Event: Send + Sync,
+    EC: EventConsumer<Event = A::Event> + std::marker::Send + std::marker::Sync,
 {
-    async fn execute(&mut self, aggregate_id: &str, command: &C) -> Result<A, CqrsError> {
+    async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError> {
         let mut aggregate = match self.event_store.load_events(aggregate_id).await {
             Ok(events) => {
                 let mut aggregate = A::default();
