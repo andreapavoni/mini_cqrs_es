@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use mini_cqrs::{
-    Aggregate, CommandDispatcher, CqrsError, EventConsumer, EventStore, SimpleCommandDispatcher,
+    Aggregate, Dispatcher, CqrsError, EventConsumer, EventStore, SimpleDispatcher,
 };
 
 // Aggregate
@@ -125,8 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(AnotherEventConsumer {}),
     ];
 
-    let mut dispatcher: SimpleCommandDispatcher<CounterState, InMemoryEventStore> =
-        SimpleCommandDispatcher::new(store, consumers);
+    let mut dispatcher: SimpleDispatcher<CounterState, InMemoryEventStore> =
+        SimpleDispatcher::new(store, consumers);
 
     let result = dispatcher
         .execute("12345", &CounterCommand::Increment(10))

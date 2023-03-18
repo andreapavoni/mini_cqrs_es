@@ -69,7 +69,7 @@ pub trait EventStore {
 
 // Command dispatcher
 #[async_trait]
-pub trait CommandDispatcher<A, ES>: Send
+pub trait Dispatcher<A, ES>: Send
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
@@ -77,7 +77,7 @@ where
     async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError>;
 }
 
-pub struct SimpleCommandDispatcher<A, ES>
+pub struct SimpleDispatcher<A, ES>
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
@@ -87,7 +87,7 @@ where
     marker: PhantomData<A>,
 }
 
-impl<A, ES> SimpleCommandDispatcher<A, ES>
+impl<A, ES> SimpleDispatcher<A, ES>
 where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
@@ -105,10 +105,10 @@ where
 }
 
 #[async_trait]
-impl<A, ES> CommandDispatcher<A, ES> for SimpleCommandDispatcher<A, ES>
+impl<A, ES> Dispatcher<A, ES> for SimpleDispatcher<A, ES>
 where
     A: Aggregate,
-    ES: EventStore<Event = A::Event> + std::marker::Send + std::marker::Sync,
+    ES: EventStore<Event = A::Event> + Send + Sync,
     A::Command: Send + Sync,
     A::Event: Send + Sync,
 {
