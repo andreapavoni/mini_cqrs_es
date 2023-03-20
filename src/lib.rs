@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Display, Formatter},
+    fmt::{Debug, Display, Formatter},
     marker::PhantomData,
 };
 
@@ -31,7 +31,7 @@ impl std::error::Error for CqrsError {}
 
 // Aggregate
 #[async_trait]
-pub trait Aggregate: Default + Sync + Send {
+pub trait Aggregate: Debug + Default + Sync + Send {
     type Command;
     type Event;
 
@@ -110,7 +110,7 @@ where
     A: Aggregate,
     ES: EventStore<Event = A::Event> + Send + Sync,
     A::Command: Send + Sync,
-    A::Event: Send + Sync,
+    A::Event: Debug + Send + Sync,
 {
     async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError> {
         let mut aggregate = match self.event_store.load_events(aggregate_id).await {

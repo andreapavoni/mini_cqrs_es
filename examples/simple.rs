@@ -1,10 +1,11 @@
+/// A basic example to show how to use the `mini_cqrs` framework.
+/// Here we have a Counter aggregate which accepts increment/decrement commands and emits
+/// incremented/decremented events. Two consumer will just print the events they receive.
 use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use mini_cqrs::{
-    Aggregate, Dispatcher, CqrsError, EventConsumer, EventStore, SimpleDispatcher,
-};
+use mini_cqrs::{Aggregate, CqrsError, Dispatcher, EventConsumer, EventStore, SimpleDispatcher};
 
 // Aggregate
 #[derive(Default, Clone, Debug)]
@@ -19,13 +20,17 @@ impl Aggregate for CounterState {
     type Event = CounterEvent;
 
     async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
-        // Lame example to apply checks and validations during command execution
-        if false {
-            return Err(CqrsError::new(format!("Command failed {:?}", command)));
-        }
         match command {
             CounterCommand::Increment(amount) => Ok(vec![CounterEvent::Incremented(*amount)]),
-            CounterCommand::Decrement(amount) => Ok(vec![CounterEvent::Decremented(*amount)]),
+            CounterCommand::Decrement(amount) => {
+                if self.count < *amount {
+                    return Err(CqrsError::new(format!(
+                        "COMMANDERROR: Decrement amount {} is greater than current count {}",
+                        amount, self.count
+                    )));
+                }
+                Ok(vec![CounterEvent::Decremented(*amount)])
+            }
         }
     }
 
@@ -63,7 +68,7 @@ impl EventConsumer for PrintEventConsumer {
     type Event = CounterEvent;
 
     async fn process<'a>(&self, event: &'a Self::Event) {
-        println!("Received event: {:?}", event);
+        println!("C: Consuming event: {:?}", event);
     }
 }
 
@@ -74,7 +79,7 @@ impl EventConsumer for AnotherEventConsumer {
     type Event = CounterEvent;
 
     async fn process<'a>(&self, event: &'a Self::Event) {
-        println!("Received event at the other consumer: {:?}", event);
+        println!("C: Consuming event on another consumer: {:?}", event);
     }
 }
 
@@ -101,7 +106,11 @@ impl EventStore for InMemoryEventStore {
         aggregate_id: &str,
         events: &Vec<Self::Event>,
     ) -> Result<(), CqrsError> {
-        self.events.insert(aggregate_id.to_string(), events.clone());
+        if let Some(current_events) = self.events.get_mut(aggregate_id) {
+            current_events.extend(events.clone());
+        } else {
+            self.events.insert(aggregate_id.to_string(), events.clone());
+        };
         Ok(())
     }
 
@@ -132,13 +141,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execute("12345", &CounterCommand::Increment(10))
         .await?;
     assert_eq!(result.count, 10);
-    println!("Counter state: {}", result.count);
+    println!("MAIN: Counter state: {}", result.count);
 
     let result = dispatcher
         .execute("12345", &CounterCommand::Decrement(3))
         .await?;
     assert_eq!(result.count, 7);
-    println!("Counter state: {}", result.count);
+    println!("MAIN: Counter state: {}", result.count);
+
+    if let Err(msg) = dispatcher
+        .execute("12345", &CounterCommand::Decrement(10))
+        .await
+    {
+        println!("MAIN: {:?}", msg);
+    }
+
+    println!("MAIN: Counter state: {}", result.count);
 
     Ok(())
 }
