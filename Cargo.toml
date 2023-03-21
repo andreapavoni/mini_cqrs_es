@@ -14,6 +14,9 @@ publish = false
 [[example]]
 name = "simple"
 
+[[example]]
+name = "game"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
