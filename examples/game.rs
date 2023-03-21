@@ -1,4 +1,9 @@
-/// Another example with a more complex use case.
+/// In this example there's a more complex use case by introducing a read model with a
+/// repository that can read and write to a database (an in-memory one here) through event
+/// consumer.
+/// Implementation is very basic, but it has been used to explore and test a more realistic use
+/// case. So, we have a Game, with 2 players, a score goal and an action that sets the points on
+/// the player. The first player that reaches the score goal wins the game.
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
@@ -52,7 +57,7 @@ impl EventStore for InMemoryEventStore {
     }
 }
 
-// Commands
+// Commands: for demonstration purposes, we can only start the game or attack the opponent.
 #[derive(PartialEq)]
 enum GameCommand {
     StartGame {
@@ -65,7 +70,7 @@ enum GameCommand {
     },
 }
 
-// Events
+// Events: the outcomes of the above commands, including the end of the game with a winner.
 #[derive(Debug, PartialEq, Clone)]
 enum GameEvent {
     GameStarted {
@@ -84,7 +89,7 @@ enum GameEvent {
     },
 }
 
-// Aggregate
+// Aggregate: it's a more complex data structure with structs and enums as field values.
 #[derive(Default, Clone, Debug, PartialEq)]
 struct Player {
     pub id: String,
@@ -106,6 +111,8 @@ struct GameState {
     goal: u32,
 }
 
+// We don't care about the default starting values, any placeholder will be ok, because the real
+// data will be loaded/stored when the game is started.
 impl Default for GameState {
     fn default() -> Self {
         Self {
@@ -131,6 +138,9 @@ impl Aggregate for GameState {
     type Id = String;
 
     async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
+        // Here's the realm for the business logic of any sorts, it can either be executed before
+        // checking the command type, or inside the command handler itself.
+
         if self.status != GameStatus::Playing {
             return Err(CqrsError::new(format!(
                 "Game is already finished with state {:?}",
@@ -139,6 +149,7 @@ impl Aggregate for GameState {
         }
 
         match command {
+            // This command will emit an event with the correct data to populate the aggregate.
             GameCommand::StartGame {
                 player_1,
                 player_2,
@@ -150,17 +161,20 @@ impl Aggregate for GameState {
                 goal: *goal,
             }]),
             GameCommand::AttackPlayer { attacker } => {
-                let player = if self.player_1.id == attacker.id {
+                let mut player = if self.player_1.id == attacker.id {
                     self.player_1.clone()
                 } else {
                     self.player_2.clone()
                 };
+                // First event: a player attacks its opponent and increases its points.
                 let mut events: Vec<GameEvent> = vec![GameEvent::PlayerAttacked {
                     aggregate_id: self.id.clone(),
                     attacker: player.clone(),
                 }];
 
+                // Second event: the player who just scored a point might also have scored the goal and win the game.
                 if player.points + 1 >= self.goal {
+                    player.points += 1;
                     events.push(GameEvent::GameEndedWithWinner {
                         aggregate_id: self.id.clone(),
                         winner: player.clone(),
@@ -180,11 +194,14 @@ impl Aggregate for GameState {
                 player_2,
                 goal,
             } => {
+                // Game is started, we can populate the aggregate with the correct data.
                 self.status = GameStatus::Playing;
                 self.goal = *goal;
                 self.player_1 = player_1.clone();
                 self.player_2 = player_2.clone();
             }
+
+            // Just sets the points on player, no other business logic here.
             GameEvent::PlayerAttacked {
                 aggregate_id: _,
                 attacker,
@@ -195,6 +212,7 @@ impl Aggregate for GameState {
                     self.player_2.points += 1;
                 }
             }
+            // We handle the end of the game separately.
             GameEvent::GameEndedWithWinner {
                 aggregate_id: _,
                 winner,
@@ -211,7 +229,10 @@ impl Aggregate for GameState {
     }
 }
 
-// Repository
+// Repository: a simple storage to project aggregate data so that it can be read/updated from the
+// outside. It exposes two queries to read and updated a read-model. For demonstration purposes it
+// has been kept very simple, but we might have many read models with more complex data structures.
+
 #[derive(Default, Clone, Debug)]
 struct InMemoryRepository {
     games: HashMap<String, GameReadModel>,
@@ -233,7 +254,9 @@ impl InMemoryRepository {
     }
 }
 
-// Read model
+// Read model: stores game data. This simple data structure might just fit into an SQL database
+// table.
+
 #[derive(Clone, Debug, PartialEq)]
 struct GameReadModel {
     goal: u32,
@@ -242,9 +265,9 @@ struct GameReadModel {
     status: GameStatus,
 }
 
-impl GameReadModel {}
+// Consumer: it contains an instance of the repository, so that it can write updates on it when
+// some event happens.
 
-// Consumer
 struct GameEventConsumer {
     repo: Arc<Mutex<InMemoryRepository>>,
 }
@@ -286,9 +309,9 @@ impl EventConsumer for GameEventConsumer {
                     .unwrap();
 
                 if model.player_1.id == attacker.id {
-                    model.player_1.points += 1;
+                    model.player_1.points = attacker.points;
                 } else {
-                    model.player_2.points += 1;
+                    model.player_2.points = attacker.points;
                 };
 
                 self.repo
@@ -301,7 +324,6 @@ impl EventConsumer for GameEventConsumer {
                 aggregate_id,
                 winner,
             } => {
-
                 let mut model: GameReadModel = self
                     .repo
                     .lock()
@@ -310,14 +332,13 @@ impl EventConsumer for GameEventConsumer {
                     .await
                     .unwrap();
 
-                    model.status = GameStatus::Winner(winner.clone());
+                model.status = GameStatus::Winner(winner.clone());
                 self.repo
                     .lock()
                     .await
                     .update_game(aggregate_id, model.to_owned())
                     .await;
-
-                }
+            }
         }
     }
 }
@@ -353,38 +374,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    dispatcher
-        .execute(
-            "12345".to_string(),
-            &GameCommand::AttackPlayer {
-                attacker: player_1.clone(),
-            },
-        )
-        .await?;
-    dispatcher
-        .execute(
-            "12345".to_string(),
-            &GameCommand::AttackPlayer {
-                attacker: player_1.clone(),
-            },
-        )
-        .await?;
-    dispatcher
-        .execute(
-            "12345".to_string(),
-            &GameCommand::AttackPlayer { attacker: player_2 },
-        )
-        .await?;
-
-    dispatcher
-        .execute(
-            "12345".to_string(),
-            &GameCommand::AttackPlayer {
-                attacker: player_1.clone(),
-            },
-        )
-        .await?;
-
     let read_model = repo
         .lock()
         .await
@@ -392,7 +381,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .unwrap();
 
-    println!("Read model: {:?}", read_model);
+    assert_eq!(read_model.player_1.id, "player_1".to_string());
+    assert_eq!(read_model.player_2.id, "player_2".to_string());
+    assert_eq!(read_model.goal, 3);
+    assert_eq!(read_model.status, GameStatus::Playing);
 
+    let result = dispatcher
+        .execute(
+            "12345".to_string(),
+            &GameCommand::AttackPlayer {
+                attacker: player_1.clone(),
+            },
+        )
+        .await?;
+
+    assert_eq!(result.player_1.points, 1);
+    assert_eq!(result.player_2.points, 0);
+    assert_eq!(result.status, GameStatus::Playing);
+
+    let result = dispatcher
+        .execute(
+            "12345".to_string(),
+            &GameCommand::AttackPlayer {
+                attacker: player_1.clone(),
+            },
+        )
+        .await?;
+
+    assert_eq!(result.player_1.points, 2);
+    assert_eq!(result.player_2.points, 0);
+    assert_eq!(result.status, GameStatus::Playing);
+
+    let result = dispatcher
+        .execute(
+            "12345".to_string(),
+            &GameCommand::AttackPlayer { attacker: player_2 },
+        )
+        .await?;
+
+    assert_eq!(result.player_1.points, 2);
+    assert_eq!(result.player_2.points, 1);
+    assert_eq!(result.status, GameStatus::Playing);
+
+    let result = dispatcher
+        .execute(
+            "12345".to_string(),
+            &GameCommand::AttackPlayer {
+                attacker: player_1.clone(),
+            },
+        )
+        .await?;
+
+    let winner = Player {
+        id: "player_1".to_string(),
+        points: 3,
+    };
+
+    assert_eq!(result.player_1.points, 3);
+    assert_eq!(result.player_2.points, 1);
+    assert_eq!(result.status, GameStatus::Winner(winner.clone()));
+
+    let read_model = repo
+        .lock()
+        .await
+        .get_game("12345".to_string())
+        .await
+        .unwrap();
+    assert_eq!(read_model.status, GameStatus::Winner(winner));
+
+    println!("Read model: {:?}", read_model);
     Ok(())
 }
