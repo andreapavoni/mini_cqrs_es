@@ -34,10 +34,12 @@ impl std::error::Error for CqrsError {}
 pub trait Aggregate: Debug + Default + Sync + Send {
     type Command;
     type Event;
+    type Id: Clone + Send + Sync + Debug;
 
     async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError>;
     fn apply(&mut self, event: &Self::Event);
-    fn aggregate_id(&self) -> &str;
+    fn aggregate_id(&self) -> Self::Id;
+    fn set_aggregate_id(&mut self, id: Self::Id);
 
     fn apply_events(&mut self, events: &Vec<Self::Event>) {
         for e in events.into_iter() {
@@ -51,20 +53,24 @@ pub trait Aggregate: Debug + Default + Sync + Send {
 pub trait EventConsumer: Sync + Send {
     type Event;
 
-    async fn process<'a>(&self, event: &'a Self::Event);
+    async fn process<'a>(&mut self, event: &'a Self::Event);
 }
 
 // Event store
 #[async_trait]
 pub trait EventStore {
     type Event: Clone;
+    type AggregateId: Clone;
 
     async fn save_events(
         &mut self,
-        aggregate_id: &str,
+        aggregate_id: Self::AggregateId,
         events: &Vec<Self::Event>,
     ) -> Result<(), CqrsError>;
-    async fn load_events(&self, aggregate_id: &str) -> Result<Vec<Self::Event>, CqrsError>;
+    async fn load_events(
+        &self,
+        aggregate_id: Self::AggregateId,
+    ) -> Result<Vec<Self::Event>, CqrsError>;
 }
 
 // Command dispatcher
@@ -74,7 +80,7 @@ where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
 {
-    async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError>;
+    async fn execute(&mut self, aggregate_id: A::Id, command: &A::Command) -> Result<A, CqrsError>;
 }
 
 pub struct SimpleDispatcher<A, ES>
@@ -108,12 +114,12 @@ where
 impl<A, ES> Dispatcher<A, ES> for SimpleDispatcher<A, ES>
 where
     A: Aggregate,
-    ES: EventStore<Event = A::Event> + Send + Sync,
+    ES: EventStore<Event = A::Event, AggregateId = A::Id> + Send + Sync,
     A::Command: Send + Sync,
     A::Event: Debug + Send + Sync,
 {
-    async fn execute(&mut self, aggregate_id: &str, command: &A::Command) -> Result<A, CqrsError> {
-        let mut aggregate = match self.event_store.load_events(aggregate_id).await {
+    async fn execute(&mut self, aggregate_id: A::Id, command: &A::Command) -> Result<A, CqrsError> {
+        let mut aggregate = match self.event_store.load_events(aggregate_id.clone()).await {
             Ok(events) => {
                 let mut aggregate = A::default();
                 aggregate.apply_events(&events);
@@ -122,12 +128,14 @@ where
             Err(_) => A::default(),
         };
 
+        aggregate.set_aggregate_id(aggregate_id.clone());
+
         let events = aggregate.handle(command).await?;
         self.event_store.save_events(aggregate_id, &events).await?;
 
         aggregate.apply_events(&events);
 
-        for consumer in &self.event_consumers {
+        for consumer in self.event_consumers.iter_mut() {
             for event in &events {
                 consumer.process(event).await;
             }
