@@ -73,6 +73,33 @@ pub trait EventStore {
     ) -> Result<Vec<Self::Event>, CqrsError>;
 }
 
+pub trait Repository: Send + Sync + Clone {}
+
+#[async_trait]
+pub trait Query: Send + Sync + Clone {
+    type Output: Clone;
+    type Repo: Repository;
+
+    async fn run(&self, repo: Self::Repo) -> QueryResult<Self::Output>;
+}
+
+pub enum QueryResult<T> {
+    One(T),
+    MaybeOne(Option<T>),
+    Many(Vec<T>),
+}
+
+#[async_trait]
+pub trait QueryRunner<R>: Send
+where
+    R: Repository,
+{
+    type Q: Send + Sync + Clone + 'static;
+    type O: Send + Sync + Clone + 'static;
+
+    async fn run(&self, query: Self::Q) -> QueryResult<Self::O>;
+}
+
 // Command dispatcher
 #[async_trait]
 pub trait Dispatcher<A, ES>: Send
@@ -142,5 +169,50 @@ where
         }
 
         Ok(aggregate)
+    }
+}
+
+pub struct Cqrs<D, A, ES, QR, R>
+where
+    D: Dispatcher<A, ES>,
+    A: Aggregate,
+    ES: EventStore<Event = A::Event, AggregateId = A::Id>,
+    QR: QueryRunner<R>,
+    R: Repository,
+{
+    dispatcher: D,
+    query_runner: QR,
+    marker: PhantomData<(A, ES, R)>,
+}
+
+impl<D, A, ES, QR, R> Cqrs<D, A, ES, QR, R>
+where
+    D: Dispatcher<A, ES>,
+    A: Aggregate,
+    ES: EventStore<Event = A::Event, AggregateId = A::Id>,
+    QR: QueryRunner<R> + Send + Sync + Clone,
+    R: Repository,
+{
+    pub fn new(dispatcher: D, query_runner: QR) -> Self {
+        Self {
+            dispatcher,
+            query_runner,
+            marker: PhantomData,
+        }
+    }
+
+    pub async fn execute(
+        &mut self,
+        aggregate_id: A::Id,
+        command: &A::Command,
+    ) -> Result<(), CqrsError> {
+        match self.dispatcher.execute(aggregate_id, command).await {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub async fn query(&self, query: QR::Q) -> QueryResult<QR::O> {
+        self.query_runner.run(query).await
     }
 }
