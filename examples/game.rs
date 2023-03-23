@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    Aggregate, Cqrs, CqrsError, EventConsumer, EventStore, Query, QueryResult, QueryRunner,
-    Repository, SimpleDispatcher,
+    Aggregate, Cqrs, CqrsError, EventConsumer, EventStore, ModelReader, Query, Repository,
+    SimpleDispatcher,
 };
 
 // Event Store
@@ -277,9 +277,9 @@ impl Query for GetGameQuery {
     type Output = GameReadModel;
     type Repo = InMemoryRepository;
 
-    async fn run(&self, repo: Self::Repo) -> QueryResult<Self::Output> {
+    async fn run(&self, repo: Self::Repo) -> Result<Self::Output, CqrsError> {
         let result: Option<Self::Output> = repo.get_game(self.aggregate_id.clone()).await;
-        QueryResult::MaybeOne(result)
+        Ok(result.unwrap())
     }
 }
 
@@ -373,22 +373,23 @@ impl EventConsumer for GameEventConsumer {
 }
 
 #[derive(Clone)]
-struct GameQueries<InMemoryRepository> {
+struct GameQueries {
     repo: Arc<Mutex<InMemoryRepository>>,
 }
 
-impl GameQueries<InMemoryRepository> {
+impl GameQueries {
     fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self { repo }
     }
 }
 
 #[async_trait]
-impl QueryRunner<InMemoryRepository> for GameQueries<InMemoryRepository> {
-    type Q = GameQuery;
-    type O = GameReadModel;
+impl ModelReader for GameQueries {
+    type Repo = InMemoryRepository;
+    type Query = GameQuery;
+    type Output = GameReadModel;
 
-    async fn run(&self, query: Self::Q) -> QueryResult<Self::O> {
+    async fn run(&self, query: Self::Query) -> Result<Self::Output, CqrsError> {
         match query {
             GameQuery::GetGame(id) => {
                 let qr = GetGameQuery { aggregate_id: id };
@@ -409,9 +410,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
         SimpleDispatcher::new(store, consumers);
 
-    let query_runner = GameQueries::new(repo);
+    let game_queries = GameQueries::new(repo);
 
-    let mut cqrs = Cqrs::new(dispatcher, query_runner);
+    let mut cqrs = Cqrs::new(dispatcher);
 
     let player_1 = Player {
         id: "player_1".to_string(),
@@ -432,35 +433,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    match cqrs.query(GameQuery::GetGame("1".to_string())).await {
-        QueryResult::MaybeOne(Some(result)) => {
-            assert_eq!(result.player_1.id, "player_1".to_string());
-            assert_eq!(result.player_2.id, "player_2".to_string());
-            assert_eq!(result.player_1.points, 0);
-            assert_eq!(result.player_2.points, 0);
+    let result = cqrs
+        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .await?;
 
-            assert_eq!(result.goal, 3);
-            assert_eq!(result.status, GameStatus::Playing);
-        }
-        _ => {}
-    }
+    assert_eq!(result.player_1.id, "player_1".to_string());
+    assert_eq!(result.player_2.id, "player_2".to_string());
+    assert_eq!(result.player_1.points, 0);
+    assert_eq!(result.player_2.points, 0);
 
-    cqrs.execute(
-        "1".to_string(),
-        &GameCommand::AttackPlayer {
-            attacker: player_1.clone(),
-        },
-    )
-    .await?;
-
-    match cqrs.query(GameQuery::GetGame("1".to_string())).await {
-        QueryResult::MaybeOne(Some(result)) => {
-            assert_eq!(result.player_1.points, 1);
-            assert_eq!(result.player_2.points, 0);
-            assert_eq!(result.status, GameStatus::Playing);
-        }
-        _ => {}
-    }
+    assert_eq!(result.goal, 3);
+    assert_eq!(result.status, GameStatus::Playing);
 
     cqrs.execute(
         "1".to_string(),
@@ -470,14 +453,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    match cqrs.query(GameQuery::GetGame("1".to_string())).await {
-        QueryResult::MaybeOne(Some(result)) => {
-            assert_eq!(result.player_1.points, 2);
-            assert_eq!(result.player_2.points, 0);
-            assert_eq!(result.status, GameStatus::Playing);
-        }
-        _ => {}
-    }
+    let result = cqrs
+        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .await?;
+
+    assert_eq!(result.player_1.points, 1);
+    assert_eq!(result.player_2.points, 0);
+    assert_eq!(result.goal, 3);
+    assert_eq!(result.status, GameStatus::Playing);
+
+    cqrs.execute(
+        "1".to_string(),
+        &GameCommand::AttackPlayer {
+            attacker: player_1.clone(),
+        },
+    )
+    .await?;
+
+    let result = cqrs
+        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .await?;
+
+    assert_eq!(result.player_1.points, 2);
+    assert_eq!(result.player_2.points, 0);
+    assert_eq!(result.goal, 3);
+    assert_eq!(result.status, GameStatus::Playing);
 
     cqrs.execute(
         "1".to_string(),
@@ -487,14 +487,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    match cqrs.query(GameQuery::GetGame("1".to_string())).await {
-        QueryResult::MaybeOne(Some(result)) => {
-            assert_eq!(result.player_1.points, 2);
-            assert_eq!(result.player_2.points, 1);
-            assert_eq!(result.status, GameStatus::Playing);
-        }
-        _ => {}
-    }
+    let result = cqrs
+        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .await?;
+
+    assert_eq!(result.player_1.points, 2);
+    assert_eq!(result.player_2.points, 1);
+    assert_eq!(result.goal, 3);
+    assert_eq!(result.status, GameStatus::Playing);
 
     cqrs.execute(
         "1".to_string(),
@@ -509,13 +509,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         points: 3,
     };
 
-    match cqrs.query(GameQuery::GetGame("1".to_string())).await {
-        QueryResult::MaybeOne(Some(result)) => {
-            assert_eq!(result.player_1.points, 3);
-            assert_eq!(result.player_2.points, 1);
-            assert_eq!(result.status, GameStatus::Winner(winner));
-        }
-        _ => {}
-    }
+    let result = cqrs
+        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .await?;
+
+    assert_eq!(result.player_1.points, 3);
+    assert_eq!(result.player_2.points, 1);
+    assert_eq!(result.goal, 3);
+    assert_eq!(result.status, GameStatus::Winner(winner));
     Ok(())
 }

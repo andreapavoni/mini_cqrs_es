@@ -80,24 +80,16 @@ pub trait Query: Send + Sync + Clone {
     type Output: Clone;
     type Repo: Repository;
 
-    async fn run(&self, repo: Self::Repo) -> QueryResult<Self::Output>;
-}
-
-pub enum QueryResult<T> {
-    One(T),
-    MaybeOne(Option<T>),
-    Many(Vec<T>),
+    async fn run(&self, repo: Self::Repo) -> Result<Self::Output, CqrsError>;
 }
 
 #[async_trait]
-pub trait QueryRunner<R>: Send
-where
-    R: Repository,
-{
-    type Q: Send + Sync + Clone + 'static;
-    type O: Send + Sync + Clone + 'static;
+pub trait ModelReader: Send {
+    type Repo: Repository;
+    type Query: Send + Sync + Clone + 'static;
+    type Output: Send + Sync + 'static;
 
-    async fn run(&self, query: Self::Q) -> QueryResult<Self::O>;
+    async fn run(&self, query: Self::Query) -> Result<Self::Output, CqrsError>;
 }
 
 // Command dispatcher
@@ -172,31 +164,25 @@ where
     }
 }
 
-pub struct Cqrs<D, A, ES, QR, R>
+pub struct Cqrs<D, A, ES>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
     ES: EventStore<Event = A::Event, AggregateId = A::Id>,
-    QR: QueryRunner<R>,
-    R: Repository,
 {
     dispatcher: D,
-    query_runner: QR,
-    marker: PhantomData<(A, ES, R)>,
+    marker: PhantomData<(A, ES)>,
 }
 
-impl<D, A, ES, QR, R> Cqrs<D, A, ES, QR, R>
+impl<D, A, ES> Cqrs<D, A, ES>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
     ES: EventStore<Event = A::Event, AggregateId = A::Id>,
-    QR: QueryRunner<R> + Send + Sync + Clone,
-    R: Repository,
 {
-    pub fn new(dispatcher: D, query_runner: QR) -> Self {
+    pub fn new(dispatcher: D) -> Self {
         Self {
             dispatcher,
-            query_runner,
             marker: PhantomData,
         }
     }
@@ -212,7 +198,11 @@ where
         }
     }
 
-    pub async fn query(&self, query: QR::Q) -> QueryResult<QR::O> {
-        self.query_runner.run(query).await
+    pub async fn query<MR: ModelReader>(
+        &self,
+        reader: MR,
+        query: MR::Query,
+    ) -> Result<<MR as ModelReader>::Output, CqrsError> {
+        reader.run(query).await
     }
 }
