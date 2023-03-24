@@ -90,6 +90,7 @@ pub trait ModelReader: Send {
     type Output: Send + Sync + 'static;
 
     async fn run(&self, query: Self::Query) -> Result<Self::Output, CqrsError>;
+    async fn update(&mut self, data: Self::Output) -> Result<(), CqrsError>;
 }
 
 // Command dispatcher

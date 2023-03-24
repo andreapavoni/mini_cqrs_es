@@ -288,90 +288,15 @@ impl Query for GetGameQuery {
 
 #[derive(Clone, Debug, PartialEq)]
 struct GameReadModel {
+    id: String,
     goal: u32,
     player_1: Player,
     player_2: Player,
     status: GameStatus,
 }
 
-// Consumer: it contains an instance of the repository, so that it can write updates on it when
-// some event happens.
-
-struct GameEventConsumer {
-    repo: Arc<Mutex<InMemoryRepository>>,
-}
-
-#[async_trait]
-impl EventConsumer for GameEventConsumer {
-    type Event = GameEvent;
-
-    async fn process<'a>(&mut self, event: &'a Self::Event) {
-        match event {
-            GameEvent::GameStarted {
-                aggregate_id,
-                player_1,
-                player_2,
-                goal,
-            } => {
-                let model = GameReadModel {
-                    player_1: player_1.clone(),
-                    player_2: player_2.clone(),
-                    goal: *goal,
-                    status: GameStatus::Playing,
-                };
-                self.repo
-                    .lock()
-                    .await
-                    .update_game(aggregate_id, model.to_owned())
-                    .await;
-            }
-            GameEvent::PlayerAttacked {
-                aggregate_id,
-                attacker,
-            } => {
-                let mut model: GameReadModel = self
-                    .repo
-                    .lock()
-                    .await
-                    .get_game(aggregate_id.clone())
-                    .await
-                    .unwrap();
-
-                if model.player_1.id == attacker.id {
-                    model.player_1.points = attacker.points;
-                } else {
-                    model.player_2.points = attacker.points;
-                };
-
-                self.repo
-                    .lock()
-                    .await
-                    .update_game(aggregate_id, model.to_owned())
-                    .await;
-            }
-            GameEvent::GameEndedWithWinner {
-                aggregate_id,
-                winner,
-            } => {
-                let mut model: GameReadModel = self
-                    .repo
-                    .lock()
-                    .await
-                    .get_game(aggregate_id.clone())
-                    .await
-                    .unwrap();
-
-                model.status = GameStatus::Winner(winner.clone());
-                self.repo
-                    .lock()
-                    .await
-                    .update_game(aggregate_id, model.to_owned())
-                    .await;
-            }
-        }
-    }
-}
-
+// Here we define a Model Reader and its queries for a given read model.
+// In theory, we could have many Model Readers, but I still need to test this behaviour.
 #[derive(Clone)]
 struct GameQueries {
     repo: Arc<Mutex<InMemoryRepository>>,
@@ -397,6 +322,83 @@ impl ModelReader for GameQueries {
             } // GameQuery::AllGames => {}
         }
     }
+
+    async fn update(&mut self, data: Self::Output) -> Result<(), CqrsError> {
+        self.repo
+            .lock()
+            .await
+            .update_game(&data.id, data.to_owned())
+            .await;
+        Ok(())
+    }
+}
+
+// Consumer: it contains an instance of the repository, so that it can write updates on it when
+// some event happens.
+
+struct GameEventConsumer {
+    game_model: GameQueries,
+}
+
+impl GameEventConsumer {
+    fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
+        Self {
+            game_model: GameQueries::new(repo),
+        }
+    }
+}
+
+#[async_trait]
+impl EventConsumer for GameEventConsumer {
+    type Event = GameEvent;
+
+    async fn process<'a>(&mut self, event: &'a Self::Event) {
+        match event {
+            GameEvent::GameStarted {
+                aggregate_id,
+                player_1,
+                player_2,
+                goal,
+            } => {
+                let model = GameReadModel {
+                    id: aggregate_id.clone(),
+                    player_1: player_1.clone(),
+                    player_2: player_2.clone(),
+                    goal: *goal,
+                    status: GameStatus::Playing,
+                };
+                _ = self.game_model.update(model).await;
+            }
+            GameEvent::PlayerAttacked {
+                aggregate_id,
+                attacker,
+            } => {
+                let mut model = self
+                    .game_model
+                    .run(GameQuery::GetGame(aggregate_id.clone()))
+                    .await
+                    .unwrap();
+                if model.player_1.id == attacker.id {
+                    model.player_1.points += 1;
+                } else {
+                    model.player_2.points += 1;
+                };
+                _ = self.game_model.update(model).await;
+            }
+            GameEvent::GameEndedWithWinner {
+                aggregate_id,
+                winner,
+            } => {
+                let mut model = self
+                    .game_model
+                    .run(GameQuery::GetGame(aggregate_id.clone()))
+                    .await
+                    .unwrap();
+                model.status = GameStatus::Winner(winner.clone());
+                _ = self.game_model.update(model).await;
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -405,7 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
 
     let consumers: Vec<Box<dyn EventConsumer<Event = GameEvent>>> =
-        vec![Box::new(GameEventConsumer { repo: repo.clone() })];
+        vec![Box::new(GameEventConsumer::new(repo.clone()))];
 
     let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
         SimpleDispatcher::new(store, consumers);
