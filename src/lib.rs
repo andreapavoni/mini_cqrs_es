@@ -36,14 +36,14 @@ pub trait Aggregate: Debug + Default + Sync + Send {
     type Event;
     type Id: Clone + Send + Sync + Debug;
 
-    async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError>;
+    async fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, CqrsError>;
     fn apply(&mut self, event: &Self::Event);
     fn aggregate_id(&self) -> Self::Id;
     fn set_aggregate_id(&mut self, id: Self::Id);
 
-    fn apply_events(&mut self, events: &Vec<Self::Event>) {
-        for e in events.into_iter() {
-            self.apply(&e);
+    fn apply_events(&mut self, events: &[Self::Event]) {
+        for e in events.iter() {
+            self.apply(e);
         }
     }
 }
@@ -65,7 +65,7 @@ pub trait EventStore {
     async fn save_events(
         &mut self,
         aggregate_id: Self::AggregateId,
-        events: &Vec<Self::Event>,
+        events: &[Self::Event],
     ) -> Result<(), CqrsError>;
     async fn load_events(
         &self,
@@ -100,7 +100,7 @@ where
     A: Aggregate,
     ES: EventStore<Event = A::Event>,
 {
-    async fn execute(&mut self, aggregate_id: A::Id, command: &A::Command) -> Result<A, CqrsError>;
+    async fn execute(&mut self, aggregate_id: A::Id, command: A::Command) -> Result<A, CqrsError>;
 }
 
 pub struct SimpleDispatcher<A, ES>
@@ -138,7 +138,7 @@ where
     A::Command: Send + Sync,
     A::Event: Debug + Send + Sync,
 {
-    async fn execute(&mut self, aggregate_id: A::Id, command: &A::Command) -> Result<A, CqrsError> {
+    async fn execute(&mut self, aggregate_id: A::Id, command: A::Command) -> Result<A, CqrsError> {
         let mut aggregate = match self.event_store.load_events(aggregate_id.clone()).await {
             Ok(events) => {
                 let mut aggregate = A::default();
@@ -191,7 +191,7 @@ where
     pub async fn execute(
         &mut self,
         aggregate_id: A::Id,
-        command: &A::Command,
+        command: A::Command,
     ) -> Result<(), CqrsError> {
         match self.dispatcher.execute(aggregate_id, command).await {
             Ok(_) => Ok(()),

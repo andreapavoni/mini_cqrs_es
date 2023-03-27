@@ -20,17 +20,17 @@ impl Aggregate for CounterState {
     type Event = CounterEvent;
     type Id = String;
 
-    async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
+    async fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
         match command {
-            CounterCommand::Increment(amount) => Ok(vec![CounterEvent::Incremented(*amount)]),
+            CounterCommand::Increment(amount) => Ok(vec![CounterEvent::Incremented(amount)]),
             CounterCommand::Decrement(amount) => {
-                if self.count < *amount {
+                if self.count < amount {
                     return Err(CqrsError::new(format!(
                         "COMMANDERROR: Decrement amount {} is greater than current count {}",
                         amount, self.count
                     )));
                 }
-                Ok(vec![CounterEvent::Decremented(*amount)])
+                Ok(vec![CounterEvent::Decremented(amount)])
             }
         }
     }
@@ -110,12 +110,12 @@ impl EventStore for InMemoryEventStore {
     async fn save_events(
         &mut self,
         aggregate_id: Self::AggregateId,
-        events: &Vec<Self::Event>,
+        events: &[Self::Event],
     ) -> Result<(), CqrsError> {
         if let Some(current_events) = self.events.get_mut(&aggregate_id) {
-            current_events.extend(events.clone());
+            current_events.extend(events.to_owned());
         } else {
-            self.events.insert(aggregate_id.to_string(), events.clone());
+            self.events.insert(aggregate_id.to_string(), events.to_vec());
         };
         Ok(())
     }
@@ -147,19 +147,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SimpleDispatcher::new(store, consumers);
 
     let result = dispatcher
-        .execute("12345".to_string(), &CounterCommand::Increment(10))
+        .execute("12345".to_string(), CounterCommand::Increment(10))
         .await?;
     assert_eq!(result.count, 10);
     println!("MAIN: Counter state: {}", result.count);
 
     let result = dispatcher
-        .execute("12345".to_string(), &CounterCommand::Decrement(3))
+        .execute("12345".to_string(), CounterCommand::Decrement(3))
         .await?;
     assert_eq!(result.count, 7);
     println!("MAIN: Counter state: {}", result.count);
 
     if let Err(msg) = dispatcher
-        .execute("12345".to_string(), &CounterCommand::Decrement(10))
+        .execute("12345".to_string(), CounterCommand::Decrement(10))
         .await
     {
         println!("MAIN: {:?}", msg);

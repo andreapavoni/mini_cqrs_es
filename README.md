@@ -33,12 +33,14 @@ Here's the plan in (sort of) descending order of importance:
   - [ ] event serialization
   - [ ] snapshotting
   - [ ] event versioning and upcasting
-- [x] EventConsumer  trait
-- [ ] ReadModel trait
-- [x] Dispatcher trait
+- [x] EventConsumer trait
+- [x] ReadModel trait
+- [x] Command dispatcher trait
   - [x] SimpleDispatcher implementation (default)
   - [x] execute commands
-  - [ ] run queries
+- [x] Cqrs wrapper
+  - [x] execute commands
+  - [x] run queries
 - [ ] macros (only if they might reduce some boilerplate non-invasively) 
 - [ ] more docs
 - [ ] add more examples

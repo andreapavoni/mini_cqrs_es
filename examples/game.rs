@@ -35,12 +35,12 @@ impl EventStore for InMemoryEventStore {
     async fn save_events(
         &mut self,
         aggregate_id: Self::AggregateId,
-        events: &Vec<Self::Event>,
+        events: &[Self::Event],
     ) -> Result<(), CqrsError> {
         if let Some(current_events) = self.events.get_mut(&aggregate_id) {
-            current_events.extend(events.clone());
+            current_events.extend(events.to_owned());
         } else {
-            self.events.insert(aggregate_id.to_string(), events.clone());
+            self.events.insert(aggregate_id.to_string(), events.to_vec());
         };
         Ok(())
     }
@@ -61,7 +61,7 @@ impl EventStore for InMemoryEventStore {
 }
 
 // Commands: for demonstration purposes, we can only start the game or attack the opponent.
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum GameCommand {
     StartGame {
         player_1: Player,
@@ -140,7 +140,7 @@ impl Aggregate for GameState {
     type Event = GameEvent;
     type Id = String;
 
-    async fn handle(&self, command: &Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
+    async fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
         // Here's the realm for the business logic of any sorts, it can either be executed before
         // checking the command type, or inside the command handler itself.
 
@@ -159,9 +159,9 @@ impl Aggregate for GameState {
                 goal,
             } => Ok(vec![GameEvent::GameStarted {
                 aggregate_id: self.id.clone(),
-                player_1: player_1.clone(),
-                player_2: player_2.clone(),
-                goal: *goal,
+                player_1: player_1,
+                player_2: player_2,
+                goal: goal,
             }]),
             GameCommand::AttackPlayer { attacker } => {
                 let mut player = if self.player_1.id == attacker.id {
@@ -240,7 +240,7 @@ impl Aggregate for GameState {
 
 #[derive(Default, Clone, Debug)]
 struct InMemoryRepository {
-    games: HashMap<String, GameReadModel>,
+    games: HashMap<String, GameModel>,
 }
 
 impl InMemoryRepository {
@@ -250,11 +250,11 @@ impl InMemoryRepository {
         }
     }
 
-    pub async fn get_game(&self, id: String) -> Option<GameReadModel> {
+    pub async fn get_game(&self, id: String) -> Option<GameModel> {
         self.games.get(&id).cloned()
     }
 
-    pub async fn update_game(&mut self, id: &str, read_model: GameReadModel) {
+    pub async fn update_game(&mut self, id: &str, read_model: GameModel) {
         self.games.insert(id.to_string(), read_model.clone());
     }
 }
@@ -274,7 +274,7 @@ struct GetGameQuery {
 
 #[async_trait]
 impl Query for GetGameQuery {
-    type Output = GameReadModel;
+    type Output = GameModel;
     type Repo = InMemoryRepository;
 
     async fn run(&self, repo: Self::Repo) -> Result<Self::Output, CqrsError> {
@@ -287,7 +287,7 @@ impl Query for GetGameQuery {
 // table.
 
 #[derive(Clone, Debug, PartialEq)]
-struct GameReadModel {
+struct GameModel {
     id: String,
     goal: u32,
     player_1: Player,
@@ -298,21 +298,21 @@ struct GameReadModel {
 // Here we define a Model Reader and its queries for a given read model.
 // In theory, we could have many Model Readers, but I still need to test this behaviour.
 #[derive(Clone)]
-struct GameQueries {
+struct GameView {
     repo: Arc<Mutex<InMemoryRepository>>,
 }
 
-impl GameQueries {
+impl GameView {
     fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self { repo }
     }
 }
 
 #[async_trait]
-impl ModelReader for GameQueries {
+impl ModelReader for GameView {
     type Repo = InMemoryRepository;
     type Query = GameQuery;
-    type Output = GameReadModel;
+    type Output = GameModel;
 
     async fn run(&self, query: Self::Query) -> Result<Self::Output, CqrsError> {
         match query {
@@ -337,13 +337,13 @@ impl ModelReader for GameQueries {
 // some event happens.
 
 struct GameEventConsumer {
-    game_model: GameQueries,
+    game_model: GameView,
 }
 
 impl GameEventConsumer {
     fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
-            game_model: GameQueries::new(repo),
+            game_model: GameView::new(repo),
         }
     }
 }
@@ -360,7 +360,7 @@ impl EventConsumer for GameEventConsumer {
                 player_2,
                 goal,
             } => {
-                let model = GameReadModel {
+                let model = GameModel {
                     id: aggregate_id.clone(),
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
@@ -412,7 +412,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
         SimpleDispatcher::new(store, consumers);
 
-    let game_queries = GameQueries::new(repo);
+    let game_queries = GameView::new(repo);
 
     let mut cqrs = Cqrs::new(dispatcher);
 
@@ -427,7 +427,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     cqrs.execute(
         "1".to_string(),
-        &GameCommand::StartGame {
+        GameCommand::StartGame {
             player_1: player_1.clone(),
             player_2: player_2.clone(),
             goal: 3,
@@ -435,8 +435,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    let query = GameQuery::GetGame("1".to_string());
+    let command = GameCommand::AttackPlayer {
+        attacker: player_1.clone(),
+    };
+
     let result = cqrs
-        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .query::<GameView>(game_queries.clone(), query.clone())
         .await?;
 
     assert_eq!(result.player_1.id, "player_1".to_string());
@@ -447,16 +452,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(result.goal, 3);
     assert_eq!(result.status, GameStatus::Playing);
 
-    cqrs.execute(
-        "1".to_string(),
-        &GameCommand::AttackPlayer {
-            attacker: player_1.clone(),
-        },
-    )
-    .await?;
+    cqrs.execute("1".to_string(), command.clone()).await?;
 
     let result = cqrs
-        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .query::<GameView>(game_queries.clone(), query.clone())
         .await?;
 
     assert_eq!(result.player_1.points, 1);
@@ -464,16 +463,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(result.goal, 3);
     assert_eq!(result.status, GameStatus::Playing);
 
-    cqrs.execute(
-        "1".to_string(),
-        &GameCommand::AttackPlayer {
-            attacker: player_1.clone(),
-        },
-    )
-    .await?;
+    cqrs.execute("1".to_string(), command.clone()).await?;
 
     let result = cqrs
-        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .query::<GameView>(game_queries.clone(), query.clone())
         .await?;
 
     assert_eq!(result.player_1.points, 2);
@@ -483,14 +476,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     cqrs.execute(
         "1".to_string(),
-        &GameCommand::AttackPlayer {
+        GameCommand::AttackPlayer {
             attacker: player_2.clone(),
         },
     )
     .await?;
 
     let result = cqrs
-        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .query::<GameView>(game_queries.clone(), query.clone())
         .await?;
 
     assert_eq!(result.player_1.points, 2);
@@ -498,13 +491,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(result.goal, 3);
     assert_eq!(result.status, GameStatus::Playing);
 
-    cqrs.execute(
-        "1".to_string(),
-        &GameCommand::AttackPlayer {
-            attacker: player_1.clone(),
-        },
-    )
-    .await?;
+    cqrs.execute("1".to_string(), command.clone()).await?;
 
     let winner = Player {
         id: player_1.id.clone(),
@@ -512,7 +499,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let result = cqrs
-        .query::<GameQueries>(game_queries.clone(), GameQuery::GetGame("1".to_string()))
+        .query::<GameView>(game_queries.clone(), query.clone())
         .await?;
 
     assert_eq!(result.player_1.points, 3);
