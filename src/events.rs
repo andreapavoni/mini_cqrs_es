@@ -1,5 +1,8 @@
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
+use async_trait::async_trait;
+
+use crate::CqrsError;
 
 #[derive(Clone, Debug)]
 pub struct Event {
@@ -32,7 +35,7 @@ impl Event {
 }
 
 #[macro_export]
-macro_rules! act_as_event {
+macro_rules! wrap_event {
     ($evt: ident) => {
         impl From<Event> for $evt {
             fn from(evt: Event) -> Self {
@@ -49,7 +52,7 @@ macro_rules! act_as_event {
 }
 
 #[allow(unused)]
-pub(crate) use act_as_event;
+pub(crate) use wrap_event;
 
 pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToString {
     fn aggregate_id(&self) -> String;
@@ -57,4 +60,20 @@ pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToStr
     fn name(&self) -> String {
         self.to_string()
     }
+}
+
+#[async_trait]
+pub trait EventStore {
+    type AggregateId: Clone;
+
+    async fn save_events(
+        &mut self,
+        aggregate_id: Self::AggregateId,
+        events: &[Event],
+    ) -> Result<(), CqrsError>;
+
+    async fn load_events(
+        &self,
+        aggregate_id: Self::AggregateId,
+    ) -> Result<Vec<Event>, CqrsError>;
 }

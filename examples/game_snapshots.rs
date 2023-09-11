@@ -1,9 +1,5 @@
-/// In this example there's a more complex use case by introducing a read model with a
-/// repository that can read and write to a database (an in-memory one here) through event
-/// consumer.
-/// Implementation is very basic, but it has been used to explore and test a more realistic use
-/// case. So, we have a Game, with 2 players, a score goal and an action that sets the points on
-/// the player. The first player that reaches the score goal wins the game.
+/// This is the same `game` example, but it uses aggregate snapshots instead of events to rebuild
+/// the aggregate.
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
@@ -12,7 +8,7 @@ use tokio::sync::Mutex;
 
 use mini_cqrs::{
     Aggregate, Cqrs, CqrsError, Event, EventConsumer, EventPayload, EventStore, ModelReader, Query,
-    Repository, SimpleDispatcher, wrap_event,
+    Repository, SnapshotStore, SnapshotDispatcher, wrap_event, AggregateSnapshot,
 };
 
 // Event Store
@@ -52,6 +48,42 @@ impl EventStore for InMemoryEventStore {
     ) -> Result<Vec<Event>, CqrsError> {
         if let Some(events) = self.events.get(&aggregate_id) {
             Ok(events.to_vec())
+        } else {
+            Err(CqrsError::new(format!(
+                "No events for aggregate id `{}`",
+                aggregate_id
+            )))
+        }
+    }
+}
+
+
+// Event Store
+struct InMemorySnapshotStore<T: Aggregate> {
+    snapshots: HashMap<String, AggregateSnapshot<T>>,
+}
+
+impl<T: Aggregate> InMemorySnapshotStore<T> {
+    pub fn new() -> Self {
+        InMemorySnapshotStore {
+            snapshots: HashMap::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl SnapshotStore<GameState> for InMemorySnapshotStore<GameState> {
+    async fn save_snapshot( &mut self, snapshot: AggregateSnapshot<GameState>) -> Result<(), CqrsError> {
+            self.snapshots.insert(snapshot.clone().aggregate_id, snapshot);
+        Ok(())
+    }
+
+    async fn load_snapshot(
+        &self,
+        aggregate_id: <GameState as Aggregate>::Id,
+    ) -> Result<AggregateSnapshot<GameState>, CqrsError> {
+        if let Some(snapshot) = self.snapshots.get(&aggregate_id) {
+            Ok(snapshot.clone())
         } else {
             Err(CqrsError::new(format!(
                 "No events for aggregate id `{}`",
@@ -369,7 +401,6 @@ impl GameEventConsumer {
 
 #[async_trait]
 impl EventConsumer for GameEventConsumer {
-
     async fn process<'a>(&mut self, evt: &'a Event) {
         let event = evt.get_payload();
 
@@ -425,12 +456,13 @@ impl EventConsumer for GameEventConsumer {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
+    let snapshot_store = InMemorySnapshotStore::new();
 
     let consumers: Vec<Box<dyn EventConsumer>> =
         vec![Box::new(GameEventConsumer::new(repo.clone()))];
 
-    let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
-        SimpleDispatcher::new(store, consumers);
+    let dispatcher: SnapshotDispatcher<GameState, InMemoryEventStore, InMemorySnapshotStore<GameState>> =
+        SnapshotDispatcher::new(store, snapshot_store, consumers);
 
     let read_model = GameView::new(repo);
 

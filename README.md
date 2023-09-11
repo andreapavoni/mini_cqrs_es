@@ -28,10 +28,11 @@ Here's the plan in (sort of) descending order of importance:
 - [x] Aggregate trait
   - [x] execute commands
   - [x] apply events
-  - [ ] serialization (for snapshotting)
+  - [x] snapshotting
+      - [x] serialization
+      - [x] snapshot store
 - [x] EventStore trait
   - [x] event serialization
-  - [ ] snapshotting
   - [ ] event versioning and upcasting
 - [x] EventConsumer trait
 - [x] ReadModel trait

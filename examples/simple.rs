@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use mini_cqrs::{Aggregate, CqrsError, Dispatcher, EventConsumer, EventStore, SimpleDispatcher, Event, act_as_event, EventPayload};
+use mini_cqrs::{Aggregate, CqrsError, Dispatcher, EventConsumer, EventStore, SimpleDispatcher, Event, wrap_event, EventPayload};
 use serde::{Serialize, Deserialize};
 
 // Aggregate
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct CounterState {
     id: String,
     count: u32,
@@ -81,7 +81,7 @@ impl ToString for CounterEvent {
     }
 }
 
-act_as_event!(CounterEvent);
+wrap_event!(CounterEvent);
 
 // Consumer
 struct PrintEventConsumer {}
