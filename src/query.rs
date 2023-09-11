@@ -16,6 +16,6 @@ pub trait ModelReader: Send {
     type Query: Send + Sync + Clone + 'static;
     type Output: Send + Sync + 'static;
 
-    async fn run(&self, query: Self::Query) -> Result<Self::Output, CqrsError>;
+    async fn query(&self, query: Self::Query) -> Result<Self::Output, CqrsError>;
     async fn update(&mut self, data: Self::Output) -> Result<(), CqrsError>;
 }

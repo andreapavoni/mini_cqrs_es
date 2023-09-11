@@ -41,6 +41,6 @@ where
         reader: MR,
         query: MR::Query,
     ) -> Result<<MR as ModelReader>::Output, CqrsError> {
-        reader.run(query).await
+        reader.query(query).await
     }
 }
