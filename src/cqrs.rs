@@ -6,7 +6,7 @@ pub struct Cqrs<D, A, ES>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
-    ES: EventStore<Event = A::Event, AggregateId = A::Id>,
+    ES: EventStore<AggregateId = A::Id>,
 {
     dispatcher: D,
     marker: PhantomData<(A, ES)>,
@@ -16,7 +16,7 @@ impl<D, A, ES> Cqrs<D, A, ES>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
-    ES: EventStore<Event = A::Event, AggregateId = A::Id>,
+    ES: EventStore<AggregateId = A::Id>,
 {
     pub fn new(dispatcher: D) -> Self {
         Self {

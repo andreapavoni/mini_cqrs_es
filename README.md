@@ -30,7 +30,7 @@ Here's the plan in (sort of) descending order of importance:
   - [x] apply events
   - [ ] serialization (for snapshotting)
 - [x] EventStore trait
-  - [ ] event serialization
+  - [x] event serialization
   - [ ] snapshotting
   - [ ] event versioning and upcasting
 - [x] EventConsumer trait
@@ -41,7 +41,7 @@ Here's the plan in (sort of) descending order of importance:
 - [x] Cqrs wrapper
   - [x] execute commands
   - [x] run queries
-- [ ] macros (only if they might reduce some boilerplate non-invasively) 
+- [x] macros (only if they might reduce some boilerplate non-invasively) 
 - [ ] more docs
 - [ ] add more examples
 - [ ] unit tests

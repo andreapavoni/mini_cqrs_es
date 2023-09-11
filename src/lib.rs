@@ -1,17 +1,19 @@
-mod error;
 mod aggregate;
 mod consumer;
+mod cqrs;
+mod dispatcher;
+mod error;
+mod event;
 mod event_store;
 mod query;
-mod dispatcher;
-mod cqrs;
+mod repository;
 
-pub use error::CqrsError;
 pub use aggregate::Aggregate;
 pub use consumer::EventConsumer;
-pub use event_store::EventStore;
-pub use query::{Query, ModelReader};
-pub use dispatcher::{Dispatcher, SimpleDispatcher};
 pub use cqrs::Cqrs;
-
-pub trait Repository: Send + Sync + Clone {}
+pub use dispatcher::{Dispatcher, SimpleDispatcher};
+pub use error::CqrsError;
+pub use event::{Event, EventPayload};
+pub use event_store::EventStore;
+pub use query::{ModelReader, Query};
+pub use repository::Repository;

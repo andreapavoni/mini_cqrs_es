@@ -7,16 +7,17 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    Aggregate, Cqrs, CqrsError, EventConsumer, EventStore, ModelReader, Query, Repository,
-    SimpleDispatcher,
+    Aggregate, Cqrs, CqrsError, Event, EventConsumer, EventPayload, EventStore, ModelReader, Query,
+    Repository, SimpleDispatcher, act_as_event,
 };
 
 // Event Store
 struct InMemoryEventStore {
-    events: HashMap<String, Vec<GameEvent>>,
+    events: HashMap<String, Vec<Event>>,
 }
 
 impl InMemoryEventStore {
@@ -29,19 +30,18 @@ impl InMemoryEventStore {
 
 #[async_trait]
 impl EventStore for InMemoryEventStore {
-    type Event = GameEvent;
     type AggregateId = String;
 
     async fn save_events(
         &mut self,
         aggregate_id: Self::AggregateId,
-        events: &[Self::Event],
+        events: &[Event],
     ) -> Result<(), CqrsError> {
         if let Some(current_events) = self.events.get_mut(&aggregate_id) {
-            current_events.extend(events.to_owned());
+            current_events.extend(events.to_vec());
         } else {
             self.events
-                .insert(aggregate_id.to_string(), events.to_vec());
+                .insert(aggregate_id.to_string(), events.into());
         };
         Ok(())
     }
@@ -49,7 +49,7 @@ impl EventStore for InMemoryEventStore {
     async fn load_events(
         &self,
         aggregate_id: Self::AggregateId,
-    ) -> Result<Vec<Self::Event>, CqrsError> {
+    ) -> Result<Vec<Event>, CqrsError> {
         if let Some(events) = self.events.get(&aggregate_id) {
             Ok(events.to_vec())
         } else {
@@ -75,7 +75,7 @@ enum GameCommand {
 }
 
 // Events: the outcomes of the above commands, including the end of the game with a winner.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 enum GameEvent {
     GameStarted {
         aggregate_id: String,
@@ -93,8 +93,30 @@ enum GameEvent {
     },
 }
 
+act_as_event!(GameEvent);
+
+impl ToString for GameEvent {
+    fn to_string(&self) -> String {
+        match self {
+            GameEvent::GameStarted { .. } => "GameStarted".to_string(),
+            GameEvent::PlayerAttacked { .. } => "PlayerAttacked".to_string(),
+            GameEvent::GameEndedWithWinner { .. } => "GameEndedWithWinner".to_string(),
+        }
+    }
+}
+
+impl EventPayload for GameEvent {
+    fn aggregate_id(&self) -> String {
+        match self {
+            GameEvent::GameStarted { aggregate_id, .. } => aggregate_id.clone(),
+            GameEvent::PlayerAttacked { aggregate_id, .. } => aggregate_id.clone(),
+            GameEvent::GameEndedWithWinner { aggregate_id, .. } => aggregate_id.clone(),
+        }
+    }
+}
+
 // Aggregate: it's a more complex data structure with structs and enums as field values.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Player {
     pub id: String,
     pub points: u32,
@@ -142,7 +164,7 @@ impl Aggregate for GameState {
     type Event = GameEvent;
     type Id = String;
 
-    async fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, CqrsError> {
+    async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, CqrsError> {
         // Here's the realm for the business logic of any sorts, it can either be executed before
         // checking the command type, or inside the command handler itself.
 
@@ -159,12 +181,7 @@ impl Aggregate for GameState {
                 player_1,
                 player_2,
                 goal,
-            } => Ok(vec![GameEvent::GameStarted {
-                aggregate_id: self.id.clone(),
-                player_1: player_1,
-                player_2: player_2,
-                goal: goal,
-            }]),
+            } => Ok(vec![GameEvent::GameStarted { aggregate_id: self.id.clone(), player_1, player_2, goal, }.into()]),
             GameCommand::AttackPlayer { attacker } => {
                 let mut player = if self.player_1.id == attacker.id {
                     self.player_1.clone()
@@ -175,17 +192,17 @@ impl Aggregate for GameState {
                 player.points += 1;
 
                 // First event: a player attacks its opponent and increases its points.
-                let mut events: Vec<GameEvent> = vec![GameEvent::PlayerAttacked {
+                let mut events: Vec<Event> = vec![GameEvent::PlayerAttacked {
                     aggregate_id: self.id.clone(),
                     attacker: player.clone(),
-                }];
+                }.into()];
 
                 // Second event: the player who just scored a point might also have scored the goal and win the game.
                 if player.points >= self.goal {
                     events.push(GameEvent::GameEndedWithWinner {
                         aggregate_id: self.id.clone(),
                         winner: player.clone(),
-                    });
+                    }.into());
                 }
 
                 Ok(events)
@@ -352,9 +369,10 @@ impl GameEventConsumer {
 
 #[async_trait]
 impl EventConsumer for GameEventConsumer {
-    type Event = GameEvent;
 
-    async fn process<'a>(&mut self, event: &'a Self::Event) {
+    async fn process<'a>(&mut self, evt: &'a Event) {
+        let event = evt.get_payload();
+
         match event {
             GameEvent::GameStarted {
                 aggregate_id,
@@ -366,7 +384,7 @@ impl EventConsumer for GameEventConsumer {
                     id: aggregate_id.clone(),
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
-                    goal: *goal,
+                    goal: goal,
                     status: GameStatus::Playing,
                 };
                 _ = self.game_model.update(model).await;
@@ -408,7 +426,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
 
-    let consumers: Vec<Box<dyn EventConsumer<Event = GameEvent>>> =
+    let consumers: Vec<Box<dyn EventConsumer>> =
         vec![Box::new(GameEventConsumer::new(repo.clone()))];
 
     let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
