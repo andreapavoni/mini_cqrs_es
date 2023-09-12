@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 use async_trait::async_trait;
@@ -9,8 +10,9 @@ pub struct Event {
     pub id: String,
     pub event_type: String,
     pub aggregate_id: String,
-    payload: serde_json::Value,
+    pub payload: serde_json::Value,
     pub version: u64,
+    pub timestamp: DateTime<Utc>,
 }
 
 impl Event {
@@ -19,6 +21,7 @@ impl Event {
         version: Option<u64>,
     ) -> Self {
         let version = version.unwrap_or(1);
+        let timestamp = Utc::now();
 
         Self {
             id: Uuid::new_v4().to_string(),
@@ -26,6 +29,7 @@ impl Event {
             aggregate_id: payload.aggregate_id(),
             payload: serde_json::to_value(payload).unwrap(),
             version,
+            timestamp,
         }
     }
 
