@@ -1,12 +1,17 @@
 /// A basic example to show how to use the `mini_cqrs` framework.
 /// Here we have a Counter aggregate which accepts increment/decrement commands and emits
 /// incremented/decremented events. Two consumer will just print the events they receive.
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 
-use mini_cqrs::{Aggregate, CqrsError, Dispatcher, EventConsumer, EventStore, SimpleDispatcher, Event, wrap_event, EventPayload};
-use serde::{Serialize, Deserialize};
+use mini_cqrs::{
+    wrap_event, Aggregate, CqrsError, Dispatcher, Event, EventConsumer, EventPayload,
+    SimpleDispatcher,
+};
+use serde::{Deserialize, Serialize};
+
+#[path = "common.rs"]
+mod common;
+use common::InMemoryEventStore;
 
 // Aggregate
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -67,9 +72,9 @@ enum CounterEvent {
 }
 
 impl EventPayload for CounterEvent {
- fn aggregate_id(&self) -> String {
-         "counter".to_string()
- }
+    fn aggregate_id(&self) -> String {
+        "counter".to_string()
+    }
 }
 
 impl ToString for CounterEvent {
@@ -99,52 +104,6 @@ struct AnotherEventConsumer {}
 impl EventConsumer for AnotherEventConsumer {
     async fn process<'a>(&mut self, event: &'a Event) {
         println!("C: Consuming event on another consumer: {:#?}", event);
-    }
-}
-
-// Event Store
-
-struct InMemoryEventStore {
-    events: HashMap<String, Vec<Event>>,
-}
-
-impl InMemoryEventStore {
-    pub fn new() -> Self {
-        InMemoryEventStore {
-            events: HashMap::new(),
-        }
-    }
-}
-
-#[async_trait]
-impl EventStore for InMemoryEventStore {
-    type AggregateId = String;
-
-    async fn save_events(
-        &mut self,
-        aggregate_id: Self::AggregateId,
-        events: &[Event],
-    ) -> Result<(), CqrsError> {
-        if let Some(current_events) = self.events.get_mut(&aggregate_id) {
-            current_events.extend(events.to_vec());
-        } else {
-            self.events.insert(aggregate_id.to_string(), events.to_vec());
-        };
-        Ok(())
-    }
-
-    async fn load_events(
-        &self,
-        aggregate_id: Self::AggregateId,
-    ) -> Result<Vec<Event>, CqrsError> {
-        if let Some(events) = self.events.get(&aggregate_id) {
-            Ok(events.to_vec())
-        } else {
-            Err(CqrsError::new(format!(
-                "No events for aggregate id `{}`",
-                aggregate_id
-            )))
-        }
     }
 }
 
