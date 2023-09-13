@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    Aggregate, AggregateSnapshot, Cqrs, CqrsError, EventConsumer, SnapshotDispatcher, SnapshotStore,
+    Aggregate, AggregateSnapshot, Cqrs, CqrsError, SnapshotDispatcher, SnapshotStore,
 };
 
 #[path = "common.rs"]
@@ -62,13 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
     let snapshot_store = InMemorySnapshotStore::new();
 
-    let consumers: Vec<Box<dyn EventConsumer>> =
-        vec![Box::new(GameEventConsumer::new(repo.clone()))];
+    let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(repo.clone()))];
 
     let dispatcher: SnapshotDispatcher<
         GameState,
         InMemoryEventStore,
         InMemorySnapshotStore<GameState>,
+        GameEventConsumers,
     > = SnapshotDispatcher::new(store, snapshot_store, consumers);
 
     let read_model = GameView::new(repo);

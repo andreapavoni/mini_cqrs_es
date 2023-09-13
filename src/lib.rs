@@ -9,7 +9,7 @@ mod repository;
 mod snapshot;
 
 pub use aggregate::Aggregate;
-pub use consumer::EventConsumer;
+pub use consumer::{EventConsumer, EventConsumersGroup};
 pub use cqrs::Cqrs;
 pub use dispatcher::{Dispatcher, SimpleDispatcher, SnapshotDispatcher};
 pub use error::CqrsError;

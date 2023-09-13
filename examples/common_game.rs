@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use mini_cqrs::{
     wrap_event, Aggregate, CqrsError, Event, EventConsumer, EventPayload, ModelReader, Query,
-    Repository,
+    Repository, event_consumers_group, EventConsumersGroup,
 };
 
 // Commands: for demonstration purposes, we can only start the game or attack the opponent.
@@ -317,11 +317,12 @@ impl ModelReader for GameView {
 // Consumer: it contains an instance of the repository, so that it can write updates on it when
 // some event happens.
 
-pub struct GameEventConsumer {
+#[derive(Clone)]
+pub struct CounterConsumer {
     game_model: GameView,
 }
 
-impl GameEventConsumer {
+impl CounterConsumer {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
             game_model: GameView::new(repo),
@@ -330,8 +331,8 @@ impl GameEventConsumer {
 }
 
 #[async_trait]
-impl EventConsumer for GameEventConsumer {
-    async fn process<'a>(&mut self, evt: &'a Event) {
+impl EventConsumer for CounterConsumer {
+    async fn process(&mut self, evt: Event) {
         let event = evt.get_payload();
 
         match event {
@@ -379,5 +380,11 @@ impl EventConsumer for GameEventConsumer {
                 _ = self.game_model.update(model).await;
             }
         }
+    }
+}
+
+event_consumers_group! {
+    GameEventConsumers {
+        Counter => CounterConsumer,
     }
 }

@@ -67,7 +67,7 @@ pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToStr
 }
 
 #[async_trait]
-pub trait EventStore {
+pub trait EventStore: Send + Sync {
     type AggregateId: Clone;
 
     async fn save_events(

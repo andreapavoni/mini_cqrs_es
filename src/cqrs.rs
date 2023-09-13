@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{Aggregate, CqrsError, Dispatcher, EventStore, ModelReader};
 
+#[derive(Clone)]
 pub struct Cqrs<D, A, ES>
 where
     D: Dispatcher<A, ES>,
@@ -29,9 +30,9 @@ where
         &mut self,
         aggregate_id: A::Id,
         command: A::Command,
-    ) -> Result<(), CqrsError> {
-        match self.dispatcher.execute(aggregate_id, command).await {
-            Ok(_) => Ok(()),
+    ) -> Result<A::Id, CqrsError> {
+        match self.dispatcher.execute(aggregate_id.clone(), command).await {
+            Ok(_) => Ok(aggregate_id),
             Err(err) => Err(err),
         }
     }

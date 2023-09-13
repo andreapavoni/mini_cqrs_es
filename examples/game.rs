@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use mini_cqrs::{Cqrs, EventConsumer, SimpleDispatcher};
+use mini_cqrs::{Cqrs, SimpleDispatcher};
 
 #[path = "common.rs"]
 mod common;
@@ -23,10 +23,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
 
-    let consumers: Vec<Box<dyn EventConsumer>> =
-        vec![Box::new(GameEventConsumer::new(repo.clone()))];
+    let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(repo.clone()))];
 
-    let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore> =
+    let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers> =
         SimpleDispatcher::new(store, consumers);
 
     let read_model = GameView::new(repo);

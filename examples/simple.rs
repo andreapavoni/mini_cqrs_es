@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use mini_cqrs::{
     wrap_event, Aggregate, CqrsError, Dispatcher, Event, EventConsumer, EventPayload,
-    SimpleDispatcher,
+    SimpleDispatcher, event_consumers_group, EventConsumersGroup,
 };
 use serde::{Deserialize, Serialize};
 
@@ -89,33 +89,43 @@ impl ToString for CounterEvent {
 wrap_event!(CounterEvent);
 
 // Consumer
-struct PrintEventConsumer {}
+#[derive(Debug, Clone)]
+pub struct PrintEventConsumer {}
 
 #[async_trait]
 impl EventConsumer for PrintEventConsumer {
-    async fn process<'a>(&mut self, event: &'a Event) {
+    async fn process(&mut self, event: Event) {
         println!("C: Consuming event: {:#?}", event);
     }
 }
 
-struct AnotherEventConsumer {}
+#[derive(Debug, Clone)]
+pub struct AnotherEventConsumer {}
 
 #[async_trait]
 impl EventConsumer for AnotherEventConsumer {
-    async fn process<'a>(&mut self, event: &'a Event) {
+    async fn process(&mut self, event: Event) {
         println!("C: Consuming event on another consumer: {:#?}", event);
+    }
+}
+
+event_consumers_group! {
+    SimpleEventConsumers {
+        Print => PrintEventConsumer,
+        Another => AnotherEventConsumer,
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
-    let consumers: Vec<Box<dyn EventConsumer>> = vec![
-        Box::new(PrintEventConsumer {}),
-        Box::new(AnotherEventConsumer {}),
+
+    let consumers = vec![
+        SimpleEventConsumers::Print(PrintEventConsumer {}),
+        SimpleEventConsumers::Another(AnotherEventConsumer {}),
     ];
 
-    let mut dispatcher: SimpleDispatcher<CounterState, InMemoryEventStore> =
+    let mut dispatcher: SimpleDispatcher<CounterState, InMemoryEventStore, SimpleEventConsumers> =
         SimpleDispatcher::new(store, consumers);
 
     let result = dispatcher

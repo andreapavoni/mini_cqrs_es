@@ -2,30 +2,32 @@ use std::{fmt::Debug, marker::PhantomData};
 
 use async_trait::async_trait;
 
-use crate::{Aggregate, CqrsError, Dispatcher, EventConsumer, EventStore, SnapshotStore, AggregateSnapshot};
+use crate::{Aggregate, CqrsError, Dispatcher, EventStore, SnapshotStore, AggregateSnapshot, EventConsumersGroup};
 
-pub struct SnapshotDispatcher<A, ES, SS>
+pub struct SnapshotDispatcher<A, ES, SS, C>
 where
     A: Aggregate,
     ES: EventStore,
     SS: SnapshotStore<A>,
+    C: EventConsumersGroup,
 {
     event_store: ES,
     snapshot_store: SS,
-    event_consumers: Vec<Box<dyn EventConsumer>>,
+    event_consumers: Vec<C>,
     marker: PhantomData<A>,
 }
 
-impl<A, ES, SS> SnapshotDispatcher<A, ES, SS>
+impl<A, ES, SS, C> SnapshotDispatcher<A, ES, SS, C>
 where
     A: Aggregate,
     ES: EventStore,
     SS: SnapshotStore<A>,
+    C: EventConsumersGroup,
 {
     pub fn new(
         event_store: ES,
         snapshot_store: SS,
-        event_consumers: Vec<Box<dyn EventConsumer>>,
+        event_consumers: Vec<C>,
     ) -> Self {
         Self {
             event_store,
@@ -37,13 +39,15 @@ where
 }
 
 #[async_trait]
-impl<A, ES, SS> Dispatcher<A, ES> for SnapshotDispatcher<A, ES, SS>
+impl<A, ES, SS, C> Dispatcher<A, ES> for SnapshotDispatcher<A, ES, SS, C>
 where
     A: Aggregate + Clone,
     ES: EventStore<AggregateId = A::Id> + Send + Sync,
     SS: SnapshotStore<A> + Send + Sync,
     A::Command: Send + Sync,
     A::Event: Debug + Send + Sync,
+    C: EventConsumersGroup,
+
 {
     async fn execute(&mut self, aggregate_id: A::Id, command: A::Command) -> Result<A, CqrsError> {
         let mut aggregate = self.load_aggregate(&aggregate_id).await;
