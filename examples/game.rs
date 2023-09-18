@@ -8,15 +8,13 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use mini_cqrs::{Cqrs, SimpleDispatcher};
-
-#[path = "common.rs"]
-mod common;
-use common::*;
+use mini_cqrs::{Cqrs, SimpleDispatcher, QueriesRunner};
 
 #[path = "common_game.rs"]
 mod common_game;
 use common_game::*;
+
+// type GameDispatcher = SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,13 +22,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
 
     let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(repo.clone()))];
-
-    let dispatcher: SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers> =
-        SimpleDispatcher::new(store, consumers);
-
-    let read_model = GameView::new(repo);
-
-    let mut cqrs = Cqrs::new(dispatcher);
+    let dispatcher: GameDispatcher = SimpleDispatcher::new(store, consumers);
+    let queries = AppQueries {};
+    let mut cqrs = Cqrs::new(dispatcher, queries);
 
     let player_1 = Player {
         id: "player_1".to_string(),
@@ -53,11 +47,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let query = GameQuery::GetGame(main_id.clone());
+    let q = GetGameQuery::new(main_id.clone(), repo.clone());
+    let result = cqrs.queries().run(q.clone()).await?.unwrap();
 
-    let result = cqrs
-        .query::<GameView>(read_model.clone(), query.clone())
-        .await?;
     assert_eq!(result.player_1.id, "player_1".to_string());
     assert_eq!(result.player_2.id, "player_2".to_string());
     verify_game_result(&result, 0, 0, 3, GameStatus::Playing);
@@ -67,15 +59,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     cqrs.execute(main_id.clone(), command.clone()).await?;
-    let result = cqrs
-        .query::<GameView>(read_model.clone(), query.clone())
-        .await?;
+
+    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 1, 0, 3, GameStatus::Playing);
 
     cqrs.execute(main_id.clone(), command.clone()).await?;
-    let result = cqrs
-        .query::<GameView>(read_model.clone(), query.clone())
-        .await?;
+
+    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 0, 3, GameStatus::Playing);
 
     cqrs.execute(
@@ -85,9 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )
     .await?;
-    let result = cqrs
-        .query::<GameView>(read_model.clone(), query.clone())
-        .await?;
+
+    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 1, 3, GameStatus::Playing);
 
     cqrs.execute(main_id.clone(), command.clone()).await?;
@@ -97,23 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         points: 3,
     };
 
-    let result = cqrs
-        .query::<GameView>(read_model.clone(), query.clone())
-        .await?;
+    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 3, 1, 3, GameStatus::Winner(winner));
 
     Ok(())
 }
 
-fn verify_game_result(
-    game: &GameModel,
-    player_1_points: u32,
-    player_2_points: u32,
-    goal: u32,
-    status: GameStatus,
-) {
-    assert_eq!(game.player_1.points, player_1_points);
-    assert_eq!(game.player_2.points, player_2_points);
-    assert_eq!(game.goal, goal);
-    assert_eq!(game.status, status);
-}

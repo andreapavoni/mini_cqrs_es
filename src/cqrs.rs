@@ -1,28 +1,32 @@
 use std::marker::PhantomData;
 
-use crate::{Aggregate, CqrsError, Dispatcher, EventStore, ModelReader};
+use crate::{Aggregate, CqrsError, Dispatcher, EventStore, QueriesRunner};
 
 #[derive(Clone)]
-pub struct Cqrs<D, A, ES>
+pub struct Cqrs<D, A, ES, Q>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
     ES: EventStore<AggregateId = A::Id>,
+    Q: QueriesRunner,
 {
     dispatcher: D,
+    queries: Q,
     marker: PhantomData<(A, ES)>,
 }
 
-impl<D, A, ES> Cqrs<D, A, ES>
+impl<D, A, ES, Q> Cqrs<D, A, ES, Q>
 where
     D: Dispatcher<A, ES>,
     A: Aggregate,
     ES: EventStore<AggregateId = A::Id>,
+    Q: QueriesRunner,
 {
-    pub fn new(dispatcher: D) -> Self {
+    pub fn new(dispatcher: D, queries: Q) -> Self {
         Self {
             dispatcher,
             marker: PhantomData,
+            queries,
         }
     }
 
@@ -37,11 +41,7 @@ where
         }
     }
 
-    pub async fn query<MR: ModelReader>(
-        &self,
-        reader: MR,
-        query: MR::Query,
-    ) -> Result<<MR as ModelReader>::Output, CqrsError> {
-        reader.query(query).await
+    pub fn queries(&self) -> &Q {
+        &self.queries
     }
 }

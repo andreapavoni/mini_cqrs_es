@@ -14,6 +14,6 @@ pub use cqrs::Cqrs;
 pub use dispatcher::{Dispatcher, SimpleDispatcher, SnapshotDispatcher};
 pub use error::CqrsError;
 pub use events::{Event, EventPayload, EventStore};
-pub use query::{ModelReader, Query};
+pub use query::{ModelReader, QueriesRunner, Query};
 pub use repository::Repository;
 pub use snapshot::{AggregateSnapshot, SnapshotStore};

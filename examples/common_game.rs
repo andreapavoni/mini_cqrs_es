@@ -9,9 +9,52 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    wrap_event, Aggregate, CqrsError, Event, EventConsumer, EventPayload, ModelReader, Query,
-    Repository, event_consumers_group, EventConsumersGroup,
+    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, CqrsError, Event,
+    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
+    Repository, SimpleDispatcher, SnapshotDispatcher, SnapshotStore,
 };
+
+#[path = "common.rs"]
+mod common;
+pub use common::*;
+
+pub struct InMemorySnapshotStore<T: Aggregate> {
+    snapshots: HashMap<String, AggregateSnapshot<T>>,
+}
+
+impl<T: Aggregate> InMemorySnapshotStore<T> {
+    pub fn new() -> Self {
+        InMemorySnapshotStore {
+            snapshots: HashMap::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl SnapshotStore<GameState> for InMemorySnapshotStore<GameState> {
+    async fn save_snapshot(
+        &mut self,
+        snapshot: AggregateSnapshot<GameState>,
+    ) -> Result<(), CqrsError> {
+        self.snapshots
+            .insert(snapshot.clone().aggregate_id, snapshot);
+        Ok(())
+    }
+
+    async fn load_snapshot(
+        &self,
+        aggregate_id: <GameState as Aggregate>::Id,
+    ) -> Result<AggregateSnapshot<GameState>, CqrsError> {
+        if let Some(snapshot) = self.snapshots.get(&aggregate_id) {
+            Ok(snapshot.clone())
+        } else {
+            Err(CqrsError::new(format!(
+                "No events for aggregate id `{}`",
+                aggregate_id
+            )))
+        }
+    }
+}
 
 // Commands: for demonstration purposes, we can only start the game or attack the opponent.
 #[derive(PartialEq, Clone)]
@@ -243,26 +286,37 @@ impl InMemoryRepository {
 impl Repository for InMemoryRepository {}
 
 #[derive(Clone)]
-pub enum GameQuery {
-    GetGame(String),
-    // AllGames,
-}
-
-#[derive(Clone)]
 pub struct GetGameQuery {
     aggregate_id: String,
+    repo: Arc<Mutex<InMemoryRepository>>,
+}
+
+impl GetGameQuery {
+    pub fn new(aggregate_id: String, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
+        Self { aggregate_id, repo }
+    }
 }
 
 #[async_trait]
 impl Query for GetGameQuery {
-    type Output = GameModel;
-    type Repo = InMemoryRepository;
+    type Output = Result<Option<GameModel>, CqrsError>;
 
-    async fn run(&self, repo: Self::Repo) -> Result<Self::Output, CqrsError> {
-        let result: Option<Self::Output> = repo.get_game(self.aggregate_id.clone()).await;
-        Ok(result.unwrap())
+    async fn apply(&self) -> Self::Output {
+        let result: Option<GameModel> = self
+            .repo
+            .lock()
+            .await
+            .get_game(self.aggregate_id.clone())
+            .await;
+        Ok(result)
     }
 }
+
+#[derive(Clone)]
+pub struct AppQueries {}
+
+#[async_trait]
+impl QueriesRunner for AppQueries {}
 
 // Read model: stores game data. This simple data structure might just fit into an SQL database
 // table.
@@ -287,24 +341,18 @@ impl GameView {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self { repo }
     }
+
+    pub fn repo(&self) -> Arc<Mutex<InMemoryRepository>> {
+        self.repo.clone()
+    }
 }
 
 #[async_trait]
 impl ModelReader for GameView {
     type Repo = InMemoryRepository;
-    type Query = GameQuery;
-    type Output = GameModel;
+    type Model = GameModel;
 
-    async fn query(&self, query: Self::Query) -> Result<Self::Output, CqrsError> {
-        match query {
-            GameQuery::GetGame(id) => {
-                let qr = GetGameQuery { aggregate_id: id };
-                qr.run(self.repo.lock().await.clone()).await
-            } // GameQuery::AllGames => {}
-        }
-    }
-
-    async fn update(&mut self, data: Self::Output) -> Result<(), CqrsError> {
+    async fn update(&mut self, data: Self::Model) -> Result<(), CqrsError> {
         self.repo
             .lock()
             .await
@@ -320,12 +368,14 @@ impl ModelReader for GameView {
 #[derive(Clone)]
 pub struct CounterConsumer {
     game_model: GameView,
+    queries: AppQueries,
 }
 
 impl CounterConsumer {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
             game_model: GameView::new(repo),
+            queries: AppQueries {},
         }
     }
 }
@@ -346,7 +396,7 @@ impl EventConsumer for CounterConsumer {
                     id: aggregate_id.clone(),
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
-                    goal: goal,
+                    goal,
                     status: GameStatus::Playing,
                 };
                 _ = self.game_model.update(model).await;
@@ -355,29 +405,25 @@ impl EventConsumer for CounterConsumer {
                 aggregate_id,
                 attacker,
             } => {
-                let mut model = self
-                    .game_model
-                    .query(GameQuery::GetGame(aggregate_id.clone()))
-                    .await
-                    .unwrap();
-                if model.player_1.id == attacker.id {
-                    model.player_1.points += 1;
-                } else {
-                    model.player_2.points += 1;
-                };
-                _ = self.game_model.update(model).await;
+                let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
+                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                    if model.player_1.id == attacker.id {
+                        model.player_1.points += 1;
+                    } else {
+                        model.player_2.points += 1;
+                    };
+                    _ = self.game_model.update(model).await;
+                }
             }
             GameEvent::GameEndedWithWinner {
                 aggregate_id,
                 winner,
             } => {
-                let mut model = self
-                    .game_model
-                    .query(GameQuery::GetGame(aggregate_id.clone()))
-                    .await
-                    .unwrap();
-                model.status = GameStatus::Winner(winner.clone());
-                _ = self.game_model.update(model).await;
+                let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
+                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                    model.status = GameStatus::Winner(winner.clone());
+                    _ = self.game_model.update(model).await;
+                }
             }
         }
     }
@@ -388,3 +434,24 @@ event_consumers_group! {
         Counter => CounterConsumer,
     }
 }
+
+pub fn verify_game_result(
+    game: &GameModel,
+    player_1_points: u32,
+    player_2_points: u32,
+    goal: u32,
+    status: GameStatus,
+) {
+    assert_eq!(game.player_1.points, player_1_points);
+    assert_eq!(game.player_2.points, player_2_points);
+    assert_eq!(game.goal, goal);
+    assert_eq!(game.status, status);
+}
+
+pub type GameDispatcher = SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers>;
+pub type GameSnapshotDispatcher = SnapshotDispatcher<
+    GameState,
+    InMemoryEventStore,
+    InMemorySnapshotStore<GameState>,
+    GameEventConsumers,
+>;
