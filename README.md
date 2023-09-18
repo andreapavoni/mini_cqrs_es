@@ -32,7 +32,7 @@ To use Mini CQRS, add it to your `Cargo.toml`. This library hasn't been publishe
 
 ```toml
 [dependencies]
-mini_cqrs = [git = "https://github.com/andreapavoni/mini_cqrs"]
+mini_cqrs = { git = "https://github.com/andreapavoni/mini_cqrs" }
 ```
 
 ## Usage
@@ -89,7 +89,7 @@ This project is open-source and available under the [MIT License](LICENSE).
 The project is somewhat usable for some real use cases, but I wouldn't recommend
 it for production use.
 
-## Roadmap
+## Roadmap
 
 Here there's a roadmap for the ideas I've in mind:
 
