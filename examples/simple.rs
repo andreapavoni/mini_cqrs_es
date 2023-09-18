@@ -80,8 +80,8 @@ impl EventPayload for CounterEvent {
 impl ToString for CounterEvent {
     fn to_string(&self) -> String {
         match self {
-            CounterEvent::Incremented(amount) => format!("Incremented {}", amount),
-            CounterEvent::Decremented(amount) => format!("Decremented {}", amount),
+            CounterEvent::Incremented(..) => "Incremented".to_string(),
+            CounterEvent::Decremented(..) => "Decremented".to_string(),
         }
     }
 }
