@@ -1,5 +1,27 @@
-/// This is the same `game` example, but it uses aggregate snapshots instead of events to rebuild
-/// the aggregate.
+/// # Mini CQRS Example: Game with Snapshot Dispatcher
+///
+/// This example is similar to the previous one but uses a different dispatcher that implements
+/// aggregate snapshots. Aggregate snapshots allow you to load aggregates more efficiently by
+/// restoring their state from a snapshot rather than replaying all events.
+///
+/// The core components of the game and its functionality remain the same, with the added benefit
+/// of improved performance when loading aggregates.
+///
+/// The components in this example are similar to the previous one, with the key difference being
+/// the use of an optimized dispatcher with aggregate snapshots.
+///
+/// The `SnapshotDispatcher` is responsible for managing aggregates using snapshots. It stores and
+/// retrieves aggregate snapshots, significantly reducing the replay of events when loading an
+/// aggregate.
+///
+/// ## Usage
+///
+/// ```sh
+/// cargo run --example game_snapshots
+/// ```
+///
+
+
 use std::sync::Arc;
 
 use tokio::sync::Mutex;

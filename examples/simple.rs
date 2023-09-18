@@ -1,6 +1,17 @@
-/// A basic example to show how to use the `mini_cqrs` framework.
-/// Here we have a Counter aggregate which accepts increment/decrement commands and emits
-/// incremented/decremented events. Two consumer will just print the events they receive.
+/// # Mini CQRS Example: Basic Counter
+///
+/// This basic example demonstrates how to use the `mini_cqrs` framework. It features a simple
+/// Counter aggregate that responds to increment and decrement commands, emitting corresponding
+/// events. Two dummy consumers are used to print the received events.
+///
+/// Here, we only use a dispatcher, without using a full CQRS wrapper or queries on read models.
+///
+/// ## Usage
+///
+/// ```sh
+/// cargo run --example simple
+/// ```
+
 use async_trait::async_trait;
 
 use mini_cqrs::{

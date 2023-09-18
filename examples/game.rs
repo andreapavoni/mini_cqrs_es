@@ -1,9 +1,29 @@
-/// In this example there's a more complex use case by introducing a read model with a
-/// repository that can read and write to a database (an in-memory one here) through event
-/// consumer.
-/// Implementation is very basic, but it has been used to explore and test a more realistic use
-/// case. So, we have a Game, with 2 players, a score goal and an action that sets the points on
-/// the player. The first player that reaches the score goal wins the game.
+/// # Mini CQRS Example: Simple Game
+///
+/// This example demonstrates a more complex use case by introducing a read model with a repository
+/// that can read and write to an in-memory database through an event consumer. While the
+/// implementation is basic, it serves as a foundation for exploring and testing more realistic use
+/// cases.
+///
+/// ## Overview
+///
+/// In this example, we simulate a simple game with the following components:
+///
+/// - **Game**: Represents the game state, including two players, a score goal, and game actions.
+/// - **Players**: Two players compete to reach the score goal.
+/// - **Actions**: Players can attack each other, earning points with each successful attack.
+/// - **Win Condition**: The first player to reach the score goal wins the game.
+///
+///
+/// ## Usage
+///
+/// ```sh
+/// cargo run --example game
+/// ```
+/// You won't see nothing in the output, but that's because the code uses `assert`s to check that
+/// it behaves as expected. The only output, if any, would be errors.
+///
+
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -13,8 +33,6 @@ use mini_cqrs::{Cqrs, SimpleDispatcher, QueriesRunner};
 #[path = "lib/common_game.rs"]
 mod common_game;
 use common_game::*;
-
-// type GameDispatcher = SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
