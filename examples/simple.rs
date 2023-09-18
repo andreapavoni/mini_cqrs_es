@@ -9,7 +9,7 @@ use mini_cqrs::{
 };
 use serde::{Deserialize, Serialize};
 
-#[path = "common.rs"]
+#[path = "lib/common.rs"]
 mod common;
 use common::InMemoryEventStore;
 

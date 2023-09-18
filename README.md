@@ -11,6 +11,9 @@ The main goals of this project are:
 - Leave as much implementation choices as possible to the developer
 - Provide some minimal glue code to assemble the pieces
 
+**The project is somewhat usable for some real use cases, but I wouldn't recommend
+it for production use. Not yet.**
+
 ## Features
 
 Mini CQRS is a set of traits to implement CQRS/ES in Rust. Macros and default trait
@@ -31,7 +34,6 @@ To use Mini CQRS, add it to your `Cargo.toml`. This library hasn't been publishe
 [dependencies]
 mini_cqrs = [git = "https://github.com/andreapavoni/mini_cqrs"]
 ```
-
 
 ## Usage
 
@@ -69,7 +71,10 @@ Spoiler: the entire code for the above example is ~500 lines of code.
 
 ## Documentation
 
-Detailed documentation can be found [here](link_to_your_documentation).
+Code is decently documented and is being improved. For real working examples you can check the  
+[examples](https://github.com/andreapavoni/mini_cqrs/tree/master/examples).
+
+There's also a small work-in-progress PoC/experiment called [simple_counter](https://github.com/andreapavoni/simple_counter) which I'm using as a playground for a more complex real world use case in terms of code and libraries integration.
 
 ## Contributing
 

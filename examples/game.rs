@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use mini_cqrs::{Cqrs, SimpleDispatcher, QueriesRunner};
 
-#[path = "common_game.rs"]
+#[path = "lib/common_game.rs"]
 mod common_game;
 use common_game::*;
 

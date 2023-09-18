@@ -13,9 +13,16 @@ publish = true
 
 [[example]]
 name = "simple"
+path = "examples/simple.rs"
 
 [[example]]
 name = "game"
+path = "examples/game.rs"
+
+
+[[example]]
+name = "game_snapshots"
+path = "examples/game_snapshots.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
