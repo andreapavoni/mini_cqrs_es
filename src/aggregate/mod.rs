@@ -47,11 +47,6 @@ pub mod manager;
 ///     type Event = MyEvent;
 ///     type Id = String;
 ///
-///     async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, CqrsError> {
-///         // Handle the command and generate events.
-///         unimplemented!()
-///     }
-///
 ///     fn apply(&mut self, event: &Self::Event) {
 ///         // Apply the event to update the aggregate's state.
 ///         unimplemented!()
@@ -68,15 +63,15 @@ pub mod manager;
 /// ```
 #[async_trait]
 pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + DeserializeOwned {
-    type Event: EventPayload;
+    type Event: EventPayload + Send + Sync;
 
-    fn apply(&mut self, event: &Self::Event);
+    async fn apply(&mut self, event: &Self::Event);
     fn aggregate_id(&self) -> Uuid;
     fn set_aggregate_id(&mut self, id: Uuid);
 
-    fn apply_events(&mut self, events: &[Event]) {
+    async fn apply_events(&mut self, events: &[Event]) {
         for e in events.iter() {
-            self.apply(&e.get_payload::<Self::Event>());
+            self.apply(&e.get_payload::<Self::Event>()).await;
         }
     }
 }

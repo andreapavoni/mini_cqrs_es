@@ -43,7 +43,7 @@ where
         aggregate.set_aggregate_id(aggregate_id);
 
         if let Ok(events) = self.event_store.load_events(aggregate_id.clone()).await {
-            aggregate.apply_events(&events);
+            aggregate.apply_events(&events).await;
             return Ok(aggregate);
         }
 

@@ -234,7 +234,7 @@ impl Default for GameState {
 impl Aggregate for GameState {
     type Event = GameEvent;
 
-    fn apply(&mut self, event: &Self::Event) {
+    async fn apply(&mut self, event: &Self::Event) {
         match event {
             GameEvent::GameStarted {
                 aggregate_id: _,

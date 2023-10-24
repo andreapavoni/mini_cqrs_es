@@ -41,7 +41,7 @@ where
         let events = command.handle(&aggregate).await?;
 
         self.event_store.save_events(aggregate_id, &events).await?;
-        aggregate.apply_events(&events);
+        aggregate.apply_events(&events).await;
 
         for consumer in self.consumers.iter_mut() {
             for event in events.iter() {
