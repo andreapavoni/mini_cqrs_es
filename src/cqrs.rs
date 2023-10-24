@@ -1,113 +1,75 @@
-use std::marker::PhantomData;
+use crate::{
+    query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
+    EventStore,
+};
+use uuid::Uuid;
 
-use crate::{Aggregate, CqrsError, Dispatcher, EventStore, QueriesRunner};
-
-/// A CQRS (Command Query Responsibility Segregation) engine for managing aggregates and executing queries.
-///
-/// The `Cqrs` struct serves as the central component for managing the Command and Query aspects of the CQRS pattern.
-/// It allows you to execute commands that modify aggregates and perform queries to retrieve read model data.
-///
-/// # Example
-///
-/// ```rust
-/// use mini_cqrs::{Cqrs, YourDispatcher, YourQueriesRunner};
-///
-/// // Create a dispatcher and queries runner.
-/// let dispatcher = YourDispatcher::new();
-/// let queries_runner = YourQueriesRunner::new();
-///
-/// // Create a Cqrs instance.
-/// let mut cqrs = Cqrs::new(dispatcher, queries_runner);
-///
-/// // Execute a command.
-/// let aggregate_id = "example_aggregate_id";
-/// let command = YourCommand::new(/* command parameters */);
-/// let result = cqrs.execute(aggregate_id.to_string(), command).await;
-///
-/// // Perform a query.
-/// let query = YourQuery::new(/* query parameters */);
-/// let query_result = cqrs.queries().run(query).await;
-/// ```
-///
-/// The `Cqrs` struct is parameterized by four generic types:
-///
-/// - `D`: The dispatcher responsible for handling commands and events.
-/// - `A`: The aggregate type associated with the CQRS engine.
-/// - `ES`: The event store used to store and retrieve events for aggregates.
-/// - `Q`: The queries runner responsible for executing queries.
-///
-/// The dispatcher is responsible for managing commands and events, the aggregate represents the business entity being modified,
-/// the event store stores the events, and the queries runner executes read model queries.
-#[derive(Clone)]
-pub struct Cqrs<D, A, ES, Q>
+/// The CQRS main entry point.
+pub struct Cqrs<ES, EC, AM>
 where
-    D: Dispatcher<A, ES>,
-    A: Aggregate,
-    ES: EventStore<AggregateId = A::Id>,
-    Q: QueriesRunner,
+    AM: AggregateManager,
+    ES: EventStore,
+    EC: EventConsumersGroup,
 {
-    dispatcher: D,
-    queries: Q,
-    marker: PhantomData<(A, ES)>,
+    /// The aggregate manager.
+    aggregate_manager: AM,
+
+    /// The event store.
+    event_store: ES,
+
+    /// The event consumers.
+    consumers: Vec<EC>,
 }
 
-impl<D, A, ES, Q> Cqrs<D, A, ES, Q>
+impl<ES, EC, AM> Cqrs<ES, EC, AM>
 where
-    D: Dispatcher<A, ES>,
-    A: Aggregate,
-    ES: EventStore<AggregateId = A::Id>,
-    Q: QueriesRunner,
+    AM: AggregateManager,
+    ES: EventStore,
+    EC: EventConsumersGroup,
 {
-    /// Creates a new `Cqrs` instance with the provided dispatcher and queries runner.
-    ///
-    /// # Parameters
-    ///
-    /// - `dispatcher`: An instance of the dispatcher responsible for handling commands and events.
-    /// - `queries`: An instance of the queries runner responsible for executing queries.
-    ///
-    /// # Returns
-    ///
-    /// A new `Cqrs` instance.
-    pub fn new(dispatcher: D, queries: Q) -> Self {
+    /// Creates a new Cqrs instance.
+    pub fn new(aggregate_manager: AM, event_store: ES, consumers: Vec<EC>) -> Self {
         Self {
-            dispatcher,
-            marker: PhantomData,
-            queries,
+            aggregate_manager,
+            event_store,
+            consumers,
         }
     }
 
-    /// Executes a command to modify an aggregate and returns the aggregate's identifier.
-    ///
-    /// This method takes a command and triggers its execution through the associated dispatcher.
-    ///
-    /// # Parameters
-    ///
-    /// - `aggregate_id`: The identifier of the aggregate to which the command applies.
-    /// - `command`: The command to execute.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(aggregate_id)`: If the command execution is successful, returns the aggregate's identifier.
-    /// - `Err(err)`: If an error occurs during command execution, returns a `CqrsError` with details about the error.
-    pub async fn execute(
-        &mut self,
-        aggregate_id: A::Id,
-        command: A::Command,
-    ) -> Result<A::Id, CqrsError> {
-        match self.dispatcher.execute(aggregate_id.clone(), command).await {
-            Ok(_) => Ok(aggregate_id),
-            Err(err) => Err(err),
-        }
-    }
+    /// Executes a command on an aggregate.
+    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<(), CqrsError>
+    where
+        C: Command,
+    {
+        let mut aggregate = self
+            .aggregate_manager
+            .load::<C::Aggregate>(aggregate_id)
+            .await?;
 
-    /// Returns a reference to the queries runner associated with this `Cqrs` instance.
-    ///
-    /// You can use the queries runner to perform read model queries.
-    ///
-    /// # Returns
-    ///
-    /// A reference to the queries runner.
-    pub fn queries(&self) -> &Q {
-        &self.queries
+        let events = command.handle(&aggregate).await?;
+
+        self.event_store.save_events(aggregate_id, &events).await?;
+        aggregate.apply_events(&events).await;
+
+        for consumer in self.consumers.iter_mut() {
+            for event in events.iter() {
+                consumer.process(event).await;
+            }
+        }
+
+        self.aggregate_manager
+            .store::<C::Aggregate>(&aggregate)
+            .await?;
+
+        Ok(())
     }
+}
+
+/// Defines `query` function to run `Query` from `Cqrs`.
+impl<ES, EC, AM> QueriesRunner for Cqrs<ES, EC, AM>
+where
+    AM: AggregateManager,
+    ES: EventStore,
+    EC: EventConsumersGroup,
+{
 }

@@ -2,89 +2,22 @@ use async_trait::async_trait;
 
 use crate::Event;
 
-/// A trait for event consumers in the event sourcing system.
+/// A trait that defines the behavior of an event consumer.
 ///
-/// Event consumers are responsible for processing events as they occur. Implement this trait
-/// to define custom event processing logic.
+/// An event consumer is responsible for processing events.
 ///
-/// # Example
-///
-/// ```rust
-/// use async_trait::async_trait;
-/// use mini_cqrs::Event;
-///
-/// struct YourEventConsumer;
-///
-/// #[async_trait]
-/// impl EventConsumer for YourEventConsumer {
-///     async fn process(&mut self, event: Event) {
-///         // Implement event processing logic here.
-///         println!("Processing event: {:?}", event);
-///     }
-/// }
-/// ```
+/// This trait must be implemented by all event consumers in your application.
 #[async_trait]
 pub trait EventConsumer: Send + Sync + 'static {
-    /// Processes an event.
-    ///
-    /// # Parameters
-    ///
-    /// - `event`: The event to be processed.
     async fn process(&mut self, event: Event);
 }
 
-/// A trait for groups of event consumers.
+/// A trait that defines the behavior of an event consumers group.
 ///
-/// This trait allows you to define groups of event consumers that can be processed together.
-/// Implement this trait to create higher-level event processing logic that involves multiple
-/// consumers.
+/// An event consumers group handles multiple event consumers. It is implemented through `event_consumers_group!`.
 ///
-/// # Example
-///
-/// ```rust
-/// use async_trait::async_trait;
-/// use mini_cqrs::{Event, EventConsumer, EventConsumersGroup};
-///
-/// struct YourEventConsumer1;
-/// struct YourEventConsumer2;
-///
-/// struct YourEventGroup {
-///     consumer1: YourEventConsumer1,
-///     consumer2: YourEventConsumer2,
-/// }
-///
-/// #[async_trait]
-/// impl EventConsumer for YourEventConsumer1 {
-///     async fn process(&mut self, event: Event) {
-///         // Implement event processing logic for consumer 1.
-///         println!("Consumer 1 processing event: {:?}", event);
-///     }
-/// }
-///
-/// #[async_trait]
-/// impl EventConsumer for YourEventConsumer2 {
-///     async fn process(&mut self, event: Event) {
-///         // Implement event processing logic for consumer 2.
-///         println!("Consumer 2 processing event: {:?}", event);
-///     }
-/// }
-///
-/// #[async_trait]
-/// impl EventConsumersGroup for YourEventGroup {
-///     async fn process(&mut self, event: &Event) {
-///         // Implement group-level event processing logic.
-///         self.consumer1.process(event.clone()).await;
-///         self.consumer2.process(event.clone()).await;
-///     }
-/// }
-/// ```
 #[async_trait]
 pub trait EventConsumersGroup: Send + Sync + 'static {
-    /// Processes an event within the group.
-    ///
-    /// # Parameters
-    ///
-    /// - `event`: The event to be processed.
     async fn process(&mut self, event: &Event);
 }
 

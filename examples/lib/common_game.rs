@@ -9,20 +9,28 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, CqrsError, Event,
+    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError, Event,
     EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
-    Repository, SimpleDispatcher, SnapshotDispatcher, SnapshotStore,
+    Repository, SnapshotStore,
 };
 
 #[path = "common.rs"]
 mod common;
 pub use common::*;
+use uuid::Uuid;
 
-pub struct InMemorySnapshotStore<T: Aggregate> {
-    snapshots: HashMap<String, AggregateSnapshot<T>>,
+#[derive(Clone, Debug)]
+pub struct InMemorySnapshotStore<T>
+where
+    T: Aggregate,
+{
+    snapshots: HashMap<Uuid, AggregateSnapshot<T>>,
 }
 
-impl<T: Aggregate> InMemorySnapshotStore<T> {
+impl<T> InMemorySnapshotStore<T>
+where
+    T: Aggregate,
+{
     pub fn new() -> Self {
         InMemorySnapshotStore {
             snapshots: HashMap::new(),
@@ -31,25 +39,33 @@ impl<T: Aggregate> InMemorySnapshotStore<T> {
 }
 
 #[async_trait]
-impl SnapshotStore<GameState> for InMemorySnapshotStore<GameState> {
-    async fn save_snapshot(
-        &mut self,
-        snapshot: AggregateSnapshot<GameState>,
-    ) -> Result<(), CqrsError> {
+impl<A> SnapshotStore for InMemorySnapshotStore<A>
+where
+    A: Aggregate,
+{
+    async fn save_snapshot<T>(&mut self, snapshot: AggregateSnapshot<T>) -> Result<(), CqrsError>
+    where
+        T: Aggregate + Clone,
+    {
+        let aggregate = snapshot.get_payload::<A>();
+        let snapshot = AggregateSnapshot::new(&aggregate, None);
+
         self.snapshots
             .insert(snapshot.clone().aggregate_id, snapshot);
         Ok(())
     }
 
-    async fn load_snapshot(
-        &self,
-        aggregate_id: <GameState as Aggregate>::Id,
-    ) -> Result<AggregateSnapshot<GameState>, CqrsError> {
+    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, CqrsError>
+    where
+        T: Aggregate + Clone,
+    {
         if let Some(snapshot) = self.snapshots.get(&aggregate_id) {
-            Ok(snapshot.clone())
+            let aggregate = snapshot.get_payload::<T>();
+
+            Ok(AggregateSnapshot::new(&aggregate, None))
         } else {
             Err(CqrsError::new(format!(
-                "No events for aggregate id `{}`",
+                "No snapshot for aggregate id `{}`",
                 aggregate_id
             )))
         }
@@ -57,33 +73,93 @@ impl SnapshotStore<GameState> for InMemorySnapshotStore<GameState> {
 }
 
 // Commands: for demonstration purposes, we can only start the game or attack the opponent.
-#[derive(PartialEq, Clone)]
-pub enum GameCommand {
-    StartGame {
-        player_1: Player,
-        player_2: Player,
-        goal: u32,
-    },
-    AttackPlayer {
-        attacker: Player,
-    },
+#[derive(PartialEq, Clone, Debug)]
+pub struct CmdStartGame {
+    pub player_1: Player,
+    pub player_2: Player,
+    pub goal: u32,
+}
+
+#[async_trait]
+impl Command for CmdStartGame {
+    type Aggregate = GameState;
+
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+        if aggregate.status != GameStatus::Playing {
+            return Err(CqrsError::new(format!(
+                "Game is already finished with state {:?}",
+                aggregate.status
+            )));
+        }
+
+        let res = vec![GameEvent::GameStarted {
+            aggregate_id: aggregate.aggregate_id(),
+            player_1: self.player_1.clone(),
+            player_2: self.player_2.clone(),
+            goal: self.goal,
+        }
+        .into()];
+
+        Ok(res)
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct CmdAttackPlayer {
+    pub attacker: Player,
+}
+
+#[async_trait]
+impl Command for CmdAttackPlayer {
+    type Aggregate = GameState;
+
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+        let mut player = if aggregate.player_1.id == self.attacker.id {
+            aggregate.player_1.clone()
+        } else {
+            aggregate.player_2.clone()
+        };
+
+        player.points += 1;
+
+        // First event: a player attacks its opponent and increases its points.
+        let mut events: Vec<Event> = vec![GameEvent::PlayerAttacked {
+            aggregate_id: aggregate.aggregate_id(),
+            attacker: player.clone(),
+        }
+        .into()]
+        .clone();
+
+        // Second event: the player who just scored a point might also have scored the goal and win the game.
+        if player.points >= aggregate.goal {
+            events.push(
+                GameEvent::GameEndedWithWinner {
+                    aggregate_id: aggregate.aggregate_id(),
+                    winner: player.clone(),
+                }
+                .into(),
+            );
+        }
+
+        Ok(events)
+    }
 }
 
 // Events: the outcomes of the above commands, including the end of the game with a winner.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum GameEvent {
     GameStarted {
-        aggregate_id: String,
+        aggregate_id: Uuid,
         player_1: Player,
         player_2: Player,
         goal: u32,
     },
     PlayerAttacked {
-        aggregate_id: String,
+        aggregate_id: Uuid,
         attacker: Player,
     },
     GameEndedWithWinner {
-        aggregate_id: String,
+        aggregate_id: Uuid,
         winner: Player,
     },
 }
@@ -101,11 +177,11 @@ impl ToString for GameEvent {
 }
 
 impl EventPayload for GameEvent {
-    fn aggregate_id(&self) -> String {
+    fn aggregate_id(&self) -> Uuid {
         match self {
-            GameEvent::GameStarted { aggregate_id, .. } => aggregate_id.clone(),
-            GameEvent::PlayerAttacked { aggregate_id, .. } => aggregate_id.clone(),
-            GameEvent::GameEndedWithWinner { aggregate_id, .. } => aggregate_id.clone(),
+            GameEvent::GameStarted { aggregate_id, .. } => *aggregate_id,
+            GameEvent::PlayerAttacked { aggregate_id, .. } => *aggregate_id,
+            GameEvent::GameEndedWithWinner { aggregate_id, .. } => *aggregate_id,
         }
     }
 }
@@ -126,7 +202,7 @@ pub enum GameStatus {
 // Game aggregate
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
-    id: String,
+    id: Uuid,
     player_1: Player,
     player_2: Player,
     status: GameStatus,
@@ -138,7 +214,7 @@ pub struct GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
-            id: String::new(),
+            id: Uuid::new_v4(),
             player_1: Player {
                 id: "player_1".to_string(),
                 points: 0,
@@ -155,67 +231,9 @@ impl Default for GameState {
 
 #[async_trait]
 impl Aggregate for GameState {
-    type Command = GameCommand;
     type Event = GameEvent;
-    type Id = String;
 
-    async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, CqrsError> {
-        // Here's the realm for the business logic of any sorts, it can either be executed before
-        // checking the command type, or inside the command handler itself.
-
-        if self.status != GameStatus::Playing {
-            return Err(CqrsError::new(format!(
-                "Game is already finished with state {:?}",
-                self.status
-            )));
-        }
-
-        match command {
-            // This command will emit an event with the correct data to populate the aggregate.
-            GameCommand::StartGame {
-                player_1,
-                player_2,
-                goal,
-            } => Ok(vec![GameEvent::GameStarted {
-                aggregate_id: self.id.clone(),
-                player_1,
-                player_2,
-                goal,
-            }
-            .into()]),
-            GameCommand::AttackPlayer { attacker } => {
-                let mut player = if self.player_1.id == attacker.id {
-                    self.player_1.clone()
-                } else {
-                    self.player_2.clone()
-                };
-
-                player.points += 1;
-
-                // First event: a player attacks its opponent and increases its points.
-                let mut events: Vec<Event> = vec![GameEvent::PlayerAttacked {
-                    aggregate_id: self.id.clone(),
-                    attacker: player.clone(),
-                }
-                .into()];
-
-                // Second event: the player who just scored a point might also have scored the goal and win the game.
-                if player.points >= self.goal {
-                    events.push(
-                        GameEvent::GameEndedWithWinner {
-                            aggregate_id: self.id.clone(),
-                            winner: player.clone(),
-                        }
-                        .into(),
-                    );
-                }
-
-                Ok(events)
-            }
-        }
-    }
-
-    fn apply(&mut self, event: &Self::Event) {
+    async fn apply(&mut self, event: &Self::Event) {
         match event {
             GameEvent::GameStarted {
                 aggregate_id: _,
@@ -249,12 +267,12 @@ impl Aggregate for GameState {
         };
     }
 
-    fn aggregate_id(&self) -> Self::Id {
-        self.id.clone()
+    fn aggregate_id(&self) -> Uuid {
+        self.id
     }
 
-    fn set_aggregate_id(&mut self, id: Self::Id) {
-        self.id = id.clone();
+    fn set_aggregate_id(&mut self, id: Uuid) {
+        self.id = id;
     }
 }
 
@@ -264,7 +282,7 @@ impl Aggregate for GameState {
 
 #[derive(Default, Clone, Debug)]
 pub struct InMemoryRepository {
-    games: HashMap<String, GameModel>,
+    games: HashMap<Uuid, GameModel>,
 }
 
 impl InMemoryRepository {
@@ -274,12 +292,12 @@ impl InMemoryRepository {
         }
     }
 
-    pub async fn get_game(&self, id: String) -> Option<GameModel> {
+    pub async fn get_game(&self, id: Uuid) -> Option<GameModel> {
         self.games.get(&id).cloned()
     }
 
-    pub async fn update_game(&mut self, id: &str, read_model: GameModel) {
-        self.games.insert(id.to_string(), read_model.clone());
+    pub async fn update_game(&mut self, id: Uuid, read_model: GameModel) {
+        self.games.insert(id, read_model.clone());
     }
 }
 
@@ -287,12 +305,12 @@ impl Repository for InMemoryRepository {}
 
 #[derive(Clone)]
 pub struct GetGameQuery {
-    aggregate_id: String,
+    aggregate_id: Uuid,
     repo: Arc<Mutex<InMemoryRepository>>,
 }
 
 impl GetGameQuery {
-    pub fn new(aggregate_id: String, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
+    pub fn new(aggregate_id: Uuid, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self { aggregate_id, repo }
     }
 }
@@ -302,28 +320,18 @@ impl Query for GetGameQuery {
     type Output = Result<Option<GameModel>, CqrsError>;
 
     async fn apply(&self) -> Self::Output {
-        let result: Option<GameModel> = self
-            .repo
-            .lock()
-            .await
-            .get_game(self.aggregate_id.clone())
-            .await;
+        let result: Option<GameModel> = self.repo.lock().await.get_game(self.aggregate_id).await;
+
         Ok(result)
     }
 }
-
-#[derive(Clone)]
-pub struct AppQueries {}
-
-#[async_trait]
-impl QueriesRunner for AppQueries {}
 
 // Read model: stores game data. This simple data structure might just fit into an SQL database
 // table.
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameModel {
-    pub id: String,
+    pub id: Uuid,
     pub goal: u32,
     pub player_1: Player,
     pub player_2: Player,
@@ -356,7 +364,7 @@ impl ModelReader for GameView {
         self.repo
             .lock()
             .await
-            .update_game(&data.id, data.to_owned())
+            .update_game(data.id, data.to_owned())
             .await;
         Ok(())
     }
@@ -368,17 +376,17 @@ impl ModelReader for GameView {
 #[derive(Clone)]
 pub struct CounterConsumer {
     game_model: GameView,
-    queries: AppQueries,
 }
 
 impl CounterConsumer {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
             game_model: GameView::new(repo),
-            queries: AppQueries {},
         }
     }
 }
+
+impl QueriesRunner for CounterConsumer {}
 
 #[async_trait]
 impl EventConsumer for CounterConsumer {
@@ -393,7 +401,7 @@ impl EventConsumer for CounterConsumer {
                 goal,
             } => {
                 let model = GameModel {
-                    id: aggregate_id.clone(),
+                    id: aggregate_id,
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
                     goal,
@@ -406,7 +414,7 @@ impl EventConsumer for CounterConsumer {
                 attacker,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                if let Ok(Some(mut model)) = self.query(&q).await {
                     if model.player_1.id == attacker.id {
                         model.player_1.points += 1;
                     } else {
@@ -420,7 +428,7 @@ impl EventConsumer for CounterConsumer {
                 winner,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                if let Ok(Some(mut model)) = self.query(&q).await {
                     model.status = GameStatus::Winner(winner.clone());
                     _ = self.game_model.update(model).await;
                 }
@@ -447,11 +455,3 @@ pub fn verify_game_result(
     assert_eq!(game.goal, goal);
     assert_eq!(game.status, status);
 }
-
-pub type GameDispatcher = SimpleDispatcher<GameState, InMemoryEventStore, GameEventConsumers>;
-pub type GameSnapshotDispatcher = SnapshotDispatcher<
-    GameState,
-    InMemoryEventStore,
-    InMemorySnapshotStore<GameState>,
-    GameEventConsumers,
->;
