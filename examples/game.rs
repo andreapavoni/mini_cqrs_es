@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use mini_cqrs::{Cqrs, QueriesRunner, SnapshotAggregateManager};
+use mini_cqrs::{Cqrs, SnapshotAggregateManager};
+
+use mini_cqrs::QueriesRunner;
 
 #[path = "lib/common_game.rs"]
 mod common_game;
@@ -29,8 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 
-    let queries = AppQueries {};
-    let mut cqrs = Cqrs::new(aggregate_manager, store.clone(), consumers, queries);
+    let mut cqrs = Cqrs::new(aggregate_manager, store.clone(), consumers);
 
     let player_1 = Player {
         id: "player_1".to_string(),
@@ -50,46 +51,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     cqrs.execute(main_id.clone(), start_cmd).await?;
-
     let q = GetGameQuery::new(main_id.clone(), repo.clone());
-
-    let result = cqrs.queries().run(q.clone()).await?.unwrap();
+    let result = cqrs.query(q.clone()).await?.unwrap();
 
     assert_eq!(result.player_1.id, "player_1".to_string());
     assert_eq!(result.player_2.id, "player_2".to_string());
     verify_game_result(&result, 0, 0, 3, GameStatus::Playing);
 
-    let attack_cmd = CmdAttackPlayer {
-        attacker: player_1.clone(),
-    };
+    let attack_cmd = CmdAttackPlayer { attacker: player_1.clone(), };
+    cqrs.execute(main_id.clone(), attack_cmd.clone()).await?;
+    let result = cqrs.query(q.clone()).await?.unwrap();
 
-    cqrs.execute::<CmdAttackPlayer>(main_id.clone(), attack_cmd.clone())
-        .await?;
-
-    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 1, 0, 3, GameStatus::Playing);
 
     cqrs.execute(main_id.clone(), attack_cmd.clone()).await?;
+    let result = cqrs.query(q.clone()).await?.unwrap();
 
-    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 0, 3, GameStatus::Playing);
 
     let attack_cmd_2 = CmdAttackPlayer {
-        attacker: player_1.clone(),
+        attacker: player_2.clone(),
     };
     cqrs.execute(main_id.clone(), attack_cmd_2).await?;
+    let result = cqrs.query(q.clone()).await?.unwrap();
 
-    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 1, 3, GameStatus::Playing);
 
     cqrs.execute(main_id.clone(), attack_cmd.clone()).await?;
-
     let winner = Player {
         id: player_1.id.clone(),
         points: 3,
     };
+    let result = cqrs.query(q.clone()).await?.unwrap();
 
-    let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 3, 1, 3, GameStatus::Winner(winner));
     Ok(())
 }

@@ -45,19 +45,7 @@ pub trait ModelReader: Send {
     async fn update(&mut self, data: Self::Model) -> Result<(), CqrsError>;
 }
 
-/// A trait representing a runner for queries on read models.
-///
-/// Queries runners allow you to execute queries on read models and retrieve results.
-///
-/// # Example
-///
-/// ```rust
-/// use mini_cqrs::{QueriesRunner, Query};
-///
-/// struct YourQueriesRunner;
-///
-/// impl QueriesRunner for YourQueriesRunner {}
-/// ```
+
 #[async_trait]
 pub trait QueriesRunner {
     /// Executes a query and returns the result.
@@ -69,7 +57,7 @@ pub trait QueriesRunner {
     /// # Returns
     ///
     /// The result of the query execution.
-    async fn run<A, B>(&self, query: A) -> B
+    async fn query<A, B>(&self, query: A) -> B
     where
         A: Query + Query<Output = B> + Clone + Send + Sync,
     {
@@ -84,8 +72,6 @@ pub trait QueriesRunner {
 /// # Example
 ///
 /// ```rust
-/// use mini_cqrs::{Query, QueriesRunner};
-///
 /// struct YourQuery;
 ///
 /// impl Query for YourQuery {

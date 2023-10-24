@@ -10,8 +10,8 @@ use tokio::sync::Mutex;
 
 use mini_cqrs::{
     event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError, Event,
-    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
-    Repository, SnapshotStore,
+    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, Query,
+    Repository, SnapshotStore, QueriesRunner,
 };
 
 #[path = "common.rs"]
@@ -97,7 +97,7 @@ impl Command for CmdStartGame {
             aggregate_id: aggregate.aggregate_id(),
             player_1: self.player_1.clone(),
             player_2: self.player_2.clone(),
-            goal: aggregate.goal,
+            goal: self.goal,
         }
         .into()];
 
@@ -332,12 +332,6 @@ impl Query for GetGameQuery {
     }
 }
 
-#[derive(Clone)]
-pub struct AppQueries {}
-
-#[async_trait]
-impl QueriesRunner for AppQueries {}
-
 // Read model: stores game data. This simple data structure might just fit into an SQL database
 // table.
 
@@ -388,17 +382,17 @@ impl ModelReader for GameView {
 #[derive(Clone)]
 pub struct CounterConsumer {
     game_model: GameView,
-    queries: AppQueries,
 }
 
 impl CounterConsumer {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
             game_model: GameView::new(repo),
-            queries: AppQueries {},
         }
     }
 }
+
+impl QueriesRunner for CounterConsumer {}
 
 #[async_trait]
 impl EventConsumer for CounterConsumer {
@@ -426,7 +420,7 @@ impl EventConsumer for CounterConsumer {
                 attacker,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                if let Ok(Some(mut model)) = self.query(q).await {
                     if model.player_1.id == attacker.id {
                         model.player_1.points += 1;
                     } else {
@@ -440,7 +434,7 @@ impl EventConsumer for CounterConsumer {
                 winner,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.queries.run(q).await {
+                if let Ok(Some(mut model)) = self.query(q).await {
                     model.status = GameStatus::Winner(winner.clone());
                     _ = self.game_model.update(model).await;
                 }
