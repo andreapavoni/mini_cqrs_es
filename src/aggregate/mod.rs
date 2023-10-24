@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-use crate::{CqrsError, EventPayload, Event};
+use crate::{EventPayload, Event};
 
 pub mod snapshot;
 pub mod manager;
@@ -68,10 +68,7 @@ pub mod manager;
 /// ```
 #[async_trait]
 pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + DeserializeOwned {
-    type Command;
     type Event: EventPayload;
-
-    async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, CqrsError>;
 
     fn apply(&mut self, event: &Self::Event);
     fn aggregate_id(&self) -> Uuid;

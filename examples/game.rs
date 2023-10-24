@@ -43,15 +43,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let main_id = Uuid::new_v4();
 
-    cqrs.execute::<GameState>(
-        main_id.clone(),
-        GameCommand::StartGame {
-            player_1: player_1.clone(),
-            player_2: player_2.clone(),
-            goal: 3,
-        },
-    )
-    .await?;
+    let start_cmd = CmdStartGame {
+        player_1: player_1.clone(),
+        player_2: player_2.clone(),
+        goal: 3,
+    };
+
+    cqrs.execute(main_id.clone(), start_cmd).await?;
 
     let q = GetGameQuery::new(main_id.clone(), repo.clone());
 
@@ -61,35 +59,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(result.player_2.id, "player_2".to_string());
     verify_game_result(&result, 0, 0, 3, GameStatus::Playing);
 
-    let command = GameCommand::AttackPlayer {
+    let attack_cmd = CmdAttackPlayer {
         attacker: player_1.clone(),
     };
 
-    cqrs.execute::<GameState>(main_id.clone(), command.clone())
+    cqrs.execute::<CmdAttackPlayer>(main_id.clone(), attack_cmd.clone())
         .await?;
 
     let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 1, 0, 3, GameStatus::Playing);
 
-    cqrs.execute::<GameState>(main_id.clone(), command.clone())
-        .await?;
+    cqrs.execute(main_id.clone(), attack_cmd.clone()).await?;
 
     let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 0, 3, GameStatus::Playing);
 
-    cqrs.execute::<GameState>(
-        main_id.clone(),
-        GameCommand::AttackPlayer {
-            attacker: player_2.clone(),
-        },
-    )
-    .await?;
+    let attack_cmd_2 = CmdAttackPlayer {
+        attacker: player_1.clone(),
+    };
+    cqrs.execute(main_id.clone(), attack_cmd_2).await?;
 
     let result = cqrs.queries().run(q.clone()).await?.unwrap();
     verify_game_result(&result, 2, 1, 3, GameStatus::Playing);
 
-    cqrs.execute::<GameState>(main_id.clone(), command.clone())
-        .await?;
+    cqrs.execute(main_id.clone(), attack_cmd.clone()).await?;
 
     let winner = Player {
         id: player_1.id.clone(),

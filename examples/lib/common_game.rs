@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use mini_cqrs::{
-    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, CqrsError, Event,
+    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError, Event,
     EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
     Repository, SnapshotStore,
 };
@@ -74,18 +74,77 @@ where
 
 // Commands: for demonstration purposes, we can only start the game or attack the opponent.
 #[derive(PartialEq, Clone, Debug)]
-pub enum GameCommand {
-    StartGame {
-        player_1: Player,
-        player_2: Player,
-        goal: u32,
-    },
-    AttackPlayer {
-        attacker: Player,
-    },
+pub struct CmdStartGame {
+    pub player_1: Player,
+    pub player_2: Player,
+    pub goal: u32,
 }
 
+#[async_trait]
+impl Command for CmdStartGame {
+    type Aggregate = GameState;
+    type Event = GameEvent;
 
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+        if aggregate.status != GameStatus::Playing {
+            return Err(CqrsError::new(format!(
+                "Game is already finished with state {:?}",
+                aggregate.status
+            )));
+        }
+
+        let res = vec![GameEvent::GameStarted {
+            aggregate_id: aggregate.aggregate_id(),
+            player_1: self.player_1.clone(),
+            player_2: self.player_2.clone(),
+            goal: aggregate.goal,
+        }
+        .into()];
+
+        Ok(res.clone())
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct CmdAttackPlayer {
+    pub attacker: Player,
+}
+
+#[async_trait]
+impl Command for CmdAttackPlayer {
+    type Aggregate = GameState;
+    type Event = GameEvent;
+
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+        let mut player = if aggregate.player_1.id == self.attacker.id {
+            aggregate.player_1.clone()
+        } else {
+            aggregate.player_2.clone()
+        };
+
+        player.points += 1;
+
+        // First event: a player attacks its opponent and increases its points.
+        let mut events: Vec<Event> = vec![GameEvent::PlayerAttacked {
+            aggregate_id: aggregate.aggregate_id(),
+            attacker: player.clone(),
+        }
+        .into()].clone();
+
+        // Second event: the player who just scored a point might also have scored the goal and win the game.
+        if player.points >= aggregate.goal {
+            events.push(
+                GameEvent::GameEndedWithWinner {
+                    aggregate_id: aggregate.aggregate_id(),
+                    winner: player.clone(),
+                }
+                .into(),
+            );
+        }
+
+        Ok(events)
+    }
+}
 
 // Events: the outcomes of the above commands, including the end of the game with a winner.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -173,64 +232,7 @@ impl Default for GameState {
 
 #[async_trait]
 impl Aggregate for GameState {
-    type Command = GameCommand;
     type Event = GameEvent;
-
-    async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, CqrsError> {
-        // Here's the realm for the business logic of any sorts, it can either be executed before
-        // checking the command type, or inside the command handler itself.
-
-        if self.status != GameStatus::Playing {
-            return Err(CqrsError::new(format!(
-                "Game is already finished with state {:?}",
-                self.status
-            )));
-        }
-
-        match command {
-            // This command will emit an event with the correct data to populate the aggregate.
-            GameCommand::StartGame {
-                player_1,
-                player_2,
-                goal,
-            } => Ok(vec![GameEvent::GameStarted {
-                aggregate_id: self.id.clone(),
-                player_1,
-                player_2,
-                goal,
-            }
-            .into()]),
-            GameCommand::AttackPlayer { attacker } => {
-                let mut player = if self.player_1.id == attacker.id {
-                    self.player_1.clone()
-                } else {
-                    self.player_2.clone()
-                };
-
-                player.points += 1;
-
-                // First event: a player attacks its opponent and increases its points.
-                let mut events: Vec<Event> = vec![GameEvent::PlayerAttacked {
-                    aggregate_id: self.id.clone(),
-                    attacker: player.clone(),
-                }
-                .into()];
-
-                // Second event: the player who just scored a point might also have scored the goal and win the game.
-                if player.points >= self.goal {
-                    events.push(
-                        GameEvent::GameEndedWithWinner {
-                            aggregate_id: self.id.clone(),
-                            winner: player.clone(),
-                        }
-                        .into(),
-                    );
-                }
-
-                Ok(events)
-            }
-        }
-    }
 
     fn apply(&mut self, event: &Self::Event) {
         match event {

@@ -55,6 +55,7 @@
 //! Contributions and bug reports are welcome! Feel free to open issues or create pull requests on the [GitHub repository](https://github.com/andreapavoni/mini_cqrs).
 
 mod aggregate;
+mod command;
 mod consumer;
 mod cqrs;
 mod error;
@@ -67,6 +68,8 @@ pub use aggregate::{
     snapshot::{AggregateSnapshot, SnapshotStore},
     Aggregate,
 };
+
+pub use command::Command;
 pub use consumer::{EventConsumer, EventConsumersGroup};
 pub use cqrs::Cqrs;
 pub use error::CqrsError;
