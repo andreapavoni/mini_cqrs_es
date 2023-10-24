@@ -7,10 +7,12 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use mini_cqrs::{CqrsError, Event, EventStore};
+use uuid::Uuid;
 
 // Event Store
+#[derive(Clone)]
 pub struct InMemoryEventStore {
-    events: HashMap<String, Vec<Event>>,
+    events: HashMap<Uuid, Vec<Event>>,
 }
 
 impl InMemoryEventStore {
@@ -23,22 +25,17 @@ impl InMemoryEventStore {
 
 #[async_trait]
 impl EventStore for InMemoryEventStore {
-    type AggregateId = String;
-
-    async fn save_events(
-        &mut self,
-        aggregate_id: Self::AggregateId,
-        events: &[Event],
-    ) -> Result<(), CqrsError> {
+    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), CqrsError> {
         if let Some(current_events) = self.events.get_mut(&aggregate_id) {
             current_events.extend(events.to_vec());
         } else {
-            self.events.insert(aggregate_id.to_string(), events.into());
+            self.events.insert(aggregate_id, events.into());
         };
+
         Ok(())
     }
 
-    async fn load_events(&self, aggregate_id: Self::AggregateId) -> Result<Vec<Event>, CqrsError> {
+    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, CqrsError> {
         if let Some(events) = self.events.get(&aggregate_id) {
             Ok(events.to_vec())
         } else {

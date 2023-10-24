@@ -35,7 +35,7 @@ pub struct Event {
     pub event_type: String,
 
     /// The identifier of the aggregate associated with the event.
-    pub aggregate_id: String,
+    pub aggregate_id: Uuid,
 
     /// The payload data of the event.
     pub payload: serde_json::Value,
@@ -138,7 +138,7 @@ macro_rules! wrap_event {
 /// ```
 pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToString {
     /// Gets the aggregate identifier associated with the event payload.
-    fn aggregate_id(&self) -> String;
+    fn aggregate_id(&self) -> Uuid;
 
     /// Gets the name of the event based on the payload.
     fn name(&self) -> String {
@@ -184,7 +184,6 @@ pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToStr
 #[async_trait]
 pub trait EventStore: Send + Sync {
     /// The type representing the unique identifier of an aggregate.
-    type AggregateId: Clone;
 
     /// Saves a list of events associated with an aggregate.
     ///
@@ -198,7 +197,7 @@ pub trait EventStore: Send + Sync {
     /// A `Result` indicating success or an error if saving events fails.
     async fn save_events(
         &mut self,
-        aggregate_id: Self::AggregateId,
+        aggregate_id: Uuid,
         events: &[Event],
     ) -> Result<(), CqrsError>;
 
@@ -213,6 +212,6 @@ pub trait EventStore: Send + Sync {
     /// A `Result` containing a vector of events or an error if loading events fails.
     async fn load_events(
         &self,
-        aggregate_id: Self::AggregateId,
+        aggregate_id: Uuid, 
     ) -> Result<Vec<Event>, CqrsError>;
 }
