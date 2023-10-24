@@ -1,0 +1,36 @@
+name: Rust CI/release
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --verbose
+    - name: Clippy
+      run: cargo clippy
+    - name: Run tests
+      run: cargo run --example game
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Clippy
+      run: cargo clippy
+    - name: Run tests
+      run: cargo run --example game
+    - uses: manoadamro/rust-release@v1
+      with:
+        owner: ${{ github.repository_owner }}
+        repo: ${{ github.repository }}
+        token: ${{ secrets.GITHUB_TOKEN }}
