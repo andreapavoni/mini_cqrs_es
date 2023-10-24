@@ -4,14 +4,20 @@ use crate::{
 };
 use uuid::Uuid;
 
+/// The CQRS main entry point.
 pub struct Cqrs<ES, EC, AM>
 where
     AM: AggregateManager,
     ES: EventStore,
     EC: EventConsumersGroup,
 {
+    /// The aggregate manager.
     aggregate_manager: AM,
+
+    /// The event store.
     event_store: ES,
+
+    /// The event consumers.
     consumers: Vec<EC>,
 }
 
@@ -21,6 +27,7 @@ where
     ES: EventStore,
     EC: EventConsumersGroup,
 {
+    /// Creates a new Cqrs instance.
     pub fn new(aggregate_manager: AM, event_store: ES, consumers: Vec<EC>) -> Self {
         Self {
             aggregate_manager,
@@ -29,7 +36,8 @@ where
         }
     }
 
-    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: C) -> Result<(), CqrsError>
+    /// Executes a command on an aggregate.
+    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<(), CqrsError>
     where
         C: Command,
     {
@@ -57,6 +65,7 @@ where
     }
 }
 
+/// Defines `query` function to run `Query` from `Cqrs`.
 impl<ES, EC, AM> QueriesRunner for Cqrs<ES, EC, AM>
 where
     AM: AggregateManager,

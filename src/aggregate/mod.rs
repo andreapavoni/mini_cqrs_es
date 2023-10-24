@@ -1,74 +1,35 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
-use crate::{EventPayload, Event};
+use crate::{Event, EventPayload};
 
-pub mod snapshot;
 pub mod manager;
+pub mod snapshot;
 
-/// A trait representing an event sourcing aggregate.
+/// A trait that defines the behavior of an aggregate.
 ///
-/// Aggregates are fundamental building blocks in event sourcing systems. They encapsulate domain
-/// logic and state changes based on commands, emitting events as a result.
+/// Aggregates are the building blocks of CQRS applications. They represent the state of a domain entity
+/// and can be mutated by applying events.
 ///
-/// An aggregate:
-/// - Receives commands through its `handle` method.
-/// - Emits events in response to commands.
-/// - Applies events to update its internal state.
-/// - Tracks its unique identifier (`Id`) to associate events with the correct instance.
-///
-/// The `Aggregate` trait is designed to be generic and can be implemented for various aggregate
-/// types. It includes methods for handling commands, applying events, and managing the aggregate's
-/// unique identifier.
-///
-/// # Example
-///
-/// ```rust
-/// use async_trait::async_trait;
-/// use serde::{Serialize, Deserialize};
-/// use crate::{CqrsError, Event, EventPayload};
-///
-/// #[derive(Debug, Serialize, Deserialize)]
-/// struct MyEvent;
-///
-/// #[derive(Debug, Clone)]
-/// struct MyCommand;
-///
-/// struct MyAggregate {
-///     id: String,
-/// }
-///
-/// #[async_trait]
-/// impl Aggregate for MyAggregate {
-///     type Command = MyCommand;
-///     type Event = MyEvent;
-///     type Id = String;
-///
-///     fn apply(&mut self, event: &Self::Event) {
-///         // Apply the event to update the aggregate's state.
-///         unimplemented!()
-///     }
-///
-///     fn aggregate_id(&self) -> Uuid {
-///         self.id.clone()
-///     }
-///
-///     fn set_aggregate_id(&mut self, id: Uuid) {
-///         self.id = id;
-///     }
-/// }
-/// ```
+/// This trait must be implemented by all aggregates in your application.
 #[async_trait]
 pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + DeserializeOwned {
+    /// The type of event that this aggregate can handle.
     type Event: EventPayload + Send + Sync;
 
+    /// Applies an event to the aggregate's state.
     async fn apply(&mut self, event: &Self::Event);
+
+    /// Returns the aggregate's ID.
     fn aggregate_id(&self) -> Uuid;
+
+    /// Sets the aggregate's ID.
     fn set_aggregate_id(&mut self, id: Uuid);
 
+    /// Applies a sequence of events to the aggregate's state.
     async fn apply_events(&mut self, events: &[Event]) {
         for e in events.iter() {
             self.apply(&e.get_payload::<Self::Event>()).await;

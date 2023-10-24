@@ -2,12 +2,19 @@ use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore};
 use async_trait::async_trait;
 use uuid::Uuid;
 
+/// A trait that defines the behavior of an aggregate manager.
+///
+/// An aggregate manager is responsible for loading and storing aggregates.
+///
+/// This trait must be implemented by all aggregate managers in your application.
 #[async_trait]
 pub trait AggregateManager: Clone + Send + Sync {
-    async fn load<A>(&mut self, _aggregate_id: Uuid) -> Result<A, CqrsError>
+    /// Loads an aggregate from the event store.
+    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, CqrsError>
     where
         A: Aggregate + Clone;
 
+    /// Stores an aggregate to the event store.
     async fn store<A>(&mut self, _aggregate: &A) -> Result<(), CqrsError>
     where
         A: Aggregate + Clone,
@@ -16,6 +23,7 @@ pub trait AggregateManager: Clone + Send + Sync {
     }
 }
 
+/// A simple aggregate manager that loads aggregates by replaying all of their events.
 #[derive(Clone)]
 pub struct SimpleAggregateManager<'a, ES>
 where
@@ -51,6 +59,7 @@ where
     }
 }
 
+/// An aggregate manager that uses a snapshot store to load and store aggregates.
 #[derive(Clone)]
 pub struct SnapshotAggregateManager<SS>
 where

@@ -37,44 +37,59 @@ mini_cqrs = { git = "https://github.com/andreapavoni/mini_cqrs" }
 
 ## Usage
 
-Being made almost entirely of traits, Mini CQRS is very flexible but, of course,
-it also requires a bit of boilerplate. For this reason, you can check out the
-[examples directory](https://github.com/andreapavoni/mini_cqrs/tree/master/examples).
 
+Once you have added the library to your project's dependencies, you can start using it by importing the library:
+
+```
+use mini_cqrs::*;
+```
+
+Being made almost entirely of traits, Mini CQRS is very flexible but, of course,
+it also requires some boilerplate. For this reason, you can check out the
+[examples directory](https://github.com/andreapavoni/mini_cqrs/tree/master/examples) for more details.
+
+When you have implemented the various traits from the library, you can finally build your CQRS architecture.
 
 Here's a snippet extracted from the [game example](https://github.com/andreapavoni/mini_cqrs/tree/master/examples/game.rs):
 
 ```rust
+
+// Setup components
 let store = InMemoryEventStore::new();
 let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
+let snapshot_store = InMemorySnapshotStore::<GameState>::new();
+let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(
+    repo.clone(),
+))];
+let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 
-let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(repo.clone()))];
-let dispatcher: GameDispatcher = SimpleDispatcher::new(store, consumers);
-let queries = AppQueries {};
-let mut cqrs = Cqrs::new(dispatcher, queries);
+// Setup a Cqrs instance
+let mut cqrs = Cqrs::new(aggregate_manager, store, consumers);
 
+// Init a command with some arguments
 let player_1 = Player { id: "player_1".to_string(), points: 0, };
 let player_2 = Player { id: "player_2".to_string(), points: 0, };
+let main_id = Uuid::new_v4();
+let start_cmd = CmdStartGame {
+    player_1: player_1.clone(),
+    player_2: player_2.clone(),
+    goal: 3,
+};
 
-let main_id = "0123456789abcdef".to_string();
-let command = GameCommand::StartGame { player_1: player_1.clone(), player_2: player_2.clone(), goal: 3, },
+// Execute the command
+cqrs.execute(main_id, &start_cmd).await?;
 
-let id = cqrs.execute( main_id.clone(), command.clone()).await?;
-
-assert_eq!(id, main_id.clone());
-
-let query = GetGameQuery::new(main_id.clone(), repo.clone());
-let result = cqrs.queries().run(query.clone()).await?.unwrap();
+// Query the read model
+let q = GetGameQuery::new(main_id, repo.clone());
+let result = cqrs.query(&q).await?.unwrap();
 ```
-
-Spoiler: the entire code for the above example is ~500 lines of code.
 
 ## Documentation
 
-Code is decently documented and is being improved. For real working examples you can check the  
+Code is documented and is being improved. For real working examples you can check the  
 [examples](https://github.com/andreapavoni/mini_cqrs/tree/master/examples).
 
-There's also a small work-in-progress PoC/experiment called [simple_counter](https://github.com/andreapavoni/simple_counter) which I'm using as a playground for a more complex real world use case in terms of code and libraries integration.
+
 
 ## Contributing
 

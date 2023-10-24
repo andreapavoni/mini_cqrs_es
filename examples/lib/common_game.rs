@@ -10,8 +10,8 @@ use tokio::sync::Mutex;
 
 use mini_cqrs::{
     event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError, Event,
-    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, Query,
-    Repository, SnapshotStore, QueriesRunner,
+    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
+    Repository, SnapshotStore,
 };
 
 #[path = "common.rs"]
@@ -83,7 +83,6 @@ pub struct CmdStartGame {
 #[async_trait]
 impl Command for CmdStartGame {
     type Aggregate = GameState;
-    type Event = GameEvent;
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
         if aggregate.status != GameStatus::Playing {
@@ -101,7 +100,7 @@ impl Command for CmdStartGame {
         }
         .into()];
 
-        Ok(res.clone())
+        Ok(res)
     }
 }
 
@@ -113,7 +112,6 @@ pub struct CmdAttackPlayer {
 #[async_trait]
 impl Command for CmdAttackPlayer {
     type Aggregate = GameState;
-    type Event = GameEvent;
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
         let mut player = if aggregate.player_1.id == self.attacker.id {
@@ -129,7 +127,8 @@ impl Command for CmdAttackPlayer {
             aggregate_id: aggregate.aggregate_id(),
             attacker: player.clone(),
         }
-        .into()].clone();
+        .into()]
+        .clone();
 
         // Second event: the player who just scored a point might also have scored the goal and win the game.
         if player.points >= aggregate.goal {
@@ -420,7 +419,7 @@ impl EventConsumer for CounterConsumer {
                 attacker,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.query(q).await {
+                if let Ok(Some(mut model)) = self.query(&q).await {
                     if model.player_1.id == attacker.id {
                         model.player_1.points += 1;
                     } else {
@@ -434,7 +433,7 @@ impl EventConsumer for CounterConsumer {
                 winner,
             } => {
                 let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.query(q).await {
+                if let Ok(Some(mut model)) = self.query(&q).await {
                     model.status = GameStatus::Winner(winner.clone());
                     _ = self.game_model.update(model).await;
                 }
