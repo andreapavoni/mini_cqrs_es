@@ -179,9 +179,9 @@ impl ToString for GameEvent {
 impl EventPayload for GameEvent {
     fn aggregate_id(&self) -> Uuid {
         match self {
-            GameEvent::GameStarted { aggregate_id, .. } => aggregate_id.clone(),
-            GameEvent::PlayerAttacked { aggregate_id, .. } => aggregate_id.clone(),
-            GameEvent::GameEndedWithWinner { aggregate_id, .. } => aggregate_id.clone(),
+            GameEvent::GameStarted { aggregate_id, .. } => *aggregate_id,
+            GameEvent::PlayerAttacked { aggregate_id, .. } => *aggregate_id,
+            GameEvent::GameEndedWithWinner { aggregate_id, .. } => *aggregate_id,
         }
     }
 }
@@ -243,7 +243,7 @@ impl Aggregate for GameState {
             } => {
                 // Game is started, we can populate the aggregate with the correct data.
                 self.status = GameStatus::Playing;
-                self.goal = goal.clone();
+                self.goal = *goal;
                 self.player_1 = player_1.clone();
                 self.player_2 = player_2.clone();
             }
@@ -268,11 +268,11 @@ impl Aggregate for GameState {
     }
 
     fn aggregate_id(&self) -> Uuid {
-        self.id.clone()
+        self.id
     }
 
     fn set_aggregate_id(&mut self, id: Uuid) {
-        self.id = id.clone();
+        self.id = id;
     }
 }
 
@@ -320,12 +320,7 @@ impl Query for GetGameQuery {
     type Output = Result<Option<GameModel>, CqrsError>;
 
     async fn apply(&self) -> Self::Output {
-        let result: Option<GameModel> = self
-            .repo
-            .lock()
-            .await
-            .get_game(self.aggregate_id.clone())
-            .await;
+        let result: Option<GameModel> = self.repo.lock().await.get_game(self.aggregate_id).await;
 
         Ok(result)
     }
@@ -406,7 +401,7 @@ impl EventConsumer for CounterConsumer {
                 goal,
             } => {
                 let model = GameModel {
-                    id: aggregate_id.clone(),
+                    id: aggregate_id,
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
                     goal,

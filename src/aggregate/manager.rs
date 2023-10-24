@@ -50,7 +50,7 @@ where
         let mut aggregate = A::default();
         aggregate.set_aggregate_id(aggregate_id);
 
-        if let Ok(events) = self.event_store.load_events(aggregate_id.clone()).await {
+        if let Ok(events) = self.event_store.load_events(aggregate_id).await {
             aggregate.apply_events(&events).await;
             return Ok(aggregate);
         }
@@ -88,7 +88,7 @@ where
     {
         if let Ok(snapshot) = self
             .snapshot_store
-            .load_snapshot::<A>(aggregate_id.clone())
+            .load_snapshot::<A>(aggregate_id)
             .await
         {
             Ok(snapshot.get_payload())

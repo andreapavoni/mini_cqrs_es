@@ -53,7 +53,7 @@ where
 
         for consumer in self.consumers.iter_mut() {
             for event in events.iter() {
-                consumer.process(&event).await;
+                consumer.process(event).await;
             }
         }
 
