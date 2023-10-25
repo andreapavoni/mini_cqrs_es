@@ -3,9 +3,7 @@ name: crates.io
 on:
   push:
     tags:        
-      - '*'           # Push events to every tag not containing /
-  workflow_dispatch:
-
+      - 'v*'           # Push events to every tag not containing /
 jobs:
   publish:
     name: Publish
