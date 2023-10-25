@@ -8,7 +8,7 @@
 /// # Example
 ///
 /// ```rust
-/// use mini_cqrs::Aggregate;
+/// use mini_cqrs_es::Aggregate;
 ///
 /// struct YourAggregateRepository;
 ///

@@ -6,8 +6,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use mini_cqrs::{CqrsError, Event, EventStore};
-use uuid::Uuid;
+use mini_cqrs_es::{CqrsError, Event, EventStore, Uuid};
 
 // Event Store
 #[derive(Clone)]

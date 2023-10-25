@@ -1,12 +1,11 @@
-use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore};
+use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore, Uuid};
 use async_trait::async_trait;
-use uuid::Uuid;
 
-/// A trait that defines the behavior of an aggregate manager.
+/// The `AggregateManager` trait defines the behavior for loading and storing the state of aggregates.
 ///
-/// An aggregate manager is responsible for loading and storing aggregates.
+/// To create your custom aggregate manager, you need to implement this trait. The two main methods to implement
+/// are `load` and `store`, allowing you to specify how aggregates are loaded and stored.
 ///
-/// This trait must be implemented by all aggregate managers in your application.
 #[async_trait]
 pub trait AggregateManager: Clone + Send + Sync {
     /// Loads an aggregate from the event store.
@@ -23,7 +22,9 @@ pub trait AggregateManager: Clone + Send + Sync {
     }
 }
 
-/// A simple aggregate manager that loads aggregates by replaying all of their events.
+/// A simple implementation of the `AggregateManager` trait. It loads aggregates
+/// by replaying their events from the associated `EventStore`, but doesn't implement any storage logic.
+///
 #[derive(Clone)]
 pub struct SimpleAggregateManager<'a, ES>
 where
@@ -60,6 +61,10 @@ where
 }
 
 /// An aggregate manager that uses a snapshot store to load and store aggregates.
+///
+/// This implementation of the `AggregateManager` trait optimizes the loading of aggregates by utilizing a
+/// `SnapshotStore`. Snapshots capture the aggregate state at specific points, reducing the need to replay
+/// all events from the beginning.
 #[derive(Clone)]
 pub struct SnapshotAggregateManager<SS>
 where
@@ -86,11 +91,7 @@ where
     where
         A: Aggregate + Clone,
     {
-        if let Ok(snapshot) = self
-            .snapshot_store
-            .load_snapshot::<A>(aggregate_id)
-            .await
-        {
+        if let Ok(snapshot) = self.snapshot_store.load_snapshot::<A>(aggregate_id).await {
             Ok(snapshot.get_payload())
         } else {
             let mut aggregate = A::default();

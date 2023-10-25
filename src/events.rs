@@ -1,11 +1,18 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Serialize};
-use uuid::Uuid;
 
-use crate::CqrsError;
+use crate::{CqrsError, Uuid};
 
-/// An event that represents a change to the state of an aggregate.
+/// The `Event` struct represents a change to the state of an aggregate in a CQRS application.
+///
+/// An event contains information such as its unique ID, event type, aggregate ID, payload data, version, and timestamp. These details
+/// help capture the changes made to an aggregate's state, allowing it to be reconstructed.
+///
+/// Events are typically created using the `Event::new` constructor, which generates a new event based on an event payload.
+///
+/// You can extract the payload from an event using the `get_payload` method, which deserializes the payload data into a specific
+/// type that implements the `EventPayload` trait.
 #[derive(Clone, Debug)]
 pub struct Event {
     /// The ID of the event.
@@ -49,7 +56,10 @@ impl Event {
     }
 }
 
-/// A macro that wraps an event payload type in an event type.
+/// The `wrap_event!` macro provides a convenient way to wrap an event payload type in an event type.
+///
+/// This macro generates the necessary implementations for conversions between an event payload type and an event type, allowing
+/// easy integration with the `Event` struct.
 #[macro_export]
 macro_rules! wrap_event {
     ($evt: ident) => {
@@ -67,11 +77,9 @@ macro_rules! wrap_event {
     };
 }
 
-/// A trait that defines the behavior of an event payload.
+/// The `EventPayload` trait defines the behavior of an event payload, representing the change the event made to the state of an aggregate.
 ///
-/// An event payload is the data that is associated with an event. It is used to represent the change that the event made to the state of the aggregate.
-///
-/// This trait must be implemented by all event payloads in your application.
+/// To create an event payload in your application, you should implement this trait for each specific event payload type.
 pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToString {
     /// Gets the ID of the aggregate that the event payload is associated with.
     fn aggregate_id(&self) -> Uuid;
@@ -82,11 +90,11 @@ pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToStr
     }
 }
 
-/// A trait that defines the behavior of an event store.
+/// The `EventStore` trait defines the behavior for storing and loading events,
+/// allowing the application to keep a historical record of state changes.
 ///
-/// An event store is responsible for storing and loading events.
-///
-/// This trait must be implemented by all event stores in your application.
+/// To create an event store in your application, you should implement this trait. You need to specify how to save and load events
+/// associated with specific aggregate IDs.
 #[async_trait]
 pub trait EventStore: Send + Sync {
     async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), CqrsError>;

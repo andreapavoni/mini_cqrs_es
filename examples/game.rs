@@ -1,4 +1,4 @@
-/// # Mini CQRS Example: Game with SnapshotAggregateManager
+/// # MiniCQRS/ES Example: Game
 ///
 /// ## Usage
 ///
@@ -8,13 +8,12 @@
 ///
 use std::sync::Arc;
 
-use mini_cqrs::{Cqrs, QueriesRunner, SnapshotAggregateManager};
+use mini_cqrs_es::{Cqrs, QueriesRunner, SnapshotAggregateManager, Uuid};
 use tokio::sync::Mutex;
 
 #[path = "lib/common_game.rs"]
 mod common_game;
 use common_game::*;
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,9 +21,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
     let snapshot_store = InMemorySnapshotStore::<GameState>::new();
 
-    let consumers = vec![GameEventConsumers::Counter(CounterConsumer::new(
-        repo.clone(),
-    ))];
+    let consumers = GameEventConsumersGroup {
+        main: GameMainConsumer::new(repo.clone()),
+        print: PrintEventConsumer {},
+    };
 
     let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 

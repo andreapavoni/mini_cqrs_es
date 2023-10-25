@@ -1,10 +1,63 @@
 use crate::{
     query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
-    EventStore,
+    EventStore, Uuid,
 };
-use uuid::Uuid;
 
-/// The CQRS main entry point.
+/// The `Cqrs` struct represents the main entry point of a Command-Query Responsibility Segregation (CQRS) application.
+///
+/// CQRS is an architectural pattern that separates the reading and writing sides of an application to achieve better performance, scalability, and maintainability. The `Cqrs` type acts as a core component, providing a structure for handling commands, queries, and event processing.
+///
+/// ## Example
+///
+/// Here's an example of how to create and use a `Cqrs` instance in a CQRS application:
+///
+/// ```rust
+/// use mini_cqrs_es::{Cqrs, AggregateManager, EventStore, EventConsumersGroup, Command, CqrsError, Uuid};
+///
+/// // Define custom aggregate manager, event store, and event consumers.
+/// struct MyAggregateManager;
+/// struct MyEventStore;
+/// struct MyEventConsumers;
+///
+/// // Implement the necessary traits for these components.
+/// impl AggregateManager for MyAggregateManager {
+///     // Implement the methods of AggregateManager
+/// }
+/// impl EventStore for MyEventStore {
+///     // Implement the methods of EventStore
+/// }
+/// impl EventConsumersGroup for MyEventConsumers {
+///     // Implement the methods of EventConsumersGroup
+/// }
+///
+/// // Define a custom command type.
+/// struct MyCommand;
+///
+/// // Implement the Command trait for the custom command.
+/// #[async_trait::async_trait]
+/// impl Command for MyCommand {
+///     type Aggregate = MyAggregate;  // Replace with your own aggregate type
+///
+///     async fn handle(&self, aggregate: &MyAggregate) -> Result<Vec<Event>, CqrsError> {
+///         // Implement command handling logic
+///         unimplemented!()
+///     }
+/// }
+///
+/// // Create a Cqrs instance.
+/// let aggregate_manager = MyAggregateManager;
+/// let event_store = MyEventStore;
+/// let consumers = MyEventConsumers;
+/// let mut cqrs = Cqrs::new(aggregate_manager, event_store, consumers);
+///
+/// // Execute a command using the Cqrs instance.
+/// let aggregate_id = Uuid::new_v4();
+/// let command = MyCommand;
+/// match cqrs.execute(aggregate_id, &command).await {
+///     Ok(()) => println!("Command executed successfully!"),
+///     Err(err) => eprintln!("Error: {:?}", err),
+/// }
+/// ```
 pub struct Cqrs<ES, EC, AM>
 where
     AM: AggregateManager,
@@ -18,7 +71,7 @@ where
     event_store: ES,
 
     /// The event consumers.
-    consumers: Vec<EC>,
+    consumers: EC,
 }
 
 impl<ES, EC, AM> Cqrs<ES, EC, AM>
@@ -28,7 +81,7 @@ where
     EC: EventConsumersGroup,
 {
     /// Creates a new Cqrs instance.
-    pub fn new(aggregate_manager: AM, event_store: ES, consumers: Vec<EC>) -> Self {
+    pub fn new(aggregate_manager: AM, event_store: ES, consumers: EC) -> Self {
         Self {
             aggregate_manager,
             event_store,
@@ -51,10 +104,8 @@ where
         self.event_store.save_events(aggregate_id, &events).await?;
         aggregate.apply_events(&events).await;
 
-        for consumer in self.consumers.iter_mut() {
-            for event in events.iter() {
-                consumer.process(event).await;
-            }
+        for event in events.iter() {
+            self.consumers.process(event).await;
         }
 
         self.aggregate_manager

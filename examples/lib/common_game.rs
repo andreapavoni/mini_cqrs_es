@@ -8,16 +8,15 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use mini_cqrs::{
-    event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError, Event,
-    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
-    Repository, SnapshotStore,
+use mini_cqrs_es::{
+    make_event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError,
+    Event, EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
+    Repository, SnapshotStore, Uuid,
 };
 
 #[path = "common.rs"]
 mod common;
 pub use common::*;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct InMemorySnapshotStore<T>
@@ -374,11 +373,11 @@ impl ModelReader for GameView {
 // some event happens.
 
 #[derive(Clone)]
-pub struct CounterConsumer {
+pub struct GameMainConsumer {
     game_model: GameView,
 }
 
-impl CounterConsumer {
+impl GameMainConsumer {
     pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self {
             game_model: GameView::new(repo),
@@ -386,10 +385,10 @@ impl CounterConsumer {
     }
 }
 
-impl QueriesRunner for CounterConsumer {}
+impl QueriesRunner for GameMainConsumer {}
 
 #[async_trait]
-impl EventConsumer for CounterConsumer {
+impl EventConsumer for GameMainConsumer {
     async fn process(&mut self, evt: Event) {
         let event = evt.get_payload();
 
@@ -437,9 +436,20 @@ impl EventConsumer for CounterConsumer {
     }
 }
 
-event_consumers_group! {
-    GameEventConsumers {
-        Counter => CounterConsumer,
+#[derive(Debug, Clone)]
+pub struct PrintEventConsumer {}
+
+#[async_trait]
+impl EventConsumer for PrintEventConsumer {
+    async fn process(&mut self, event: Event) {
+        println!("PrintEventConsumer: {:#?}", event);
+    }
+}
+
+make_event_consumers_group! {
+    GameEventConsumersGroup {
+        main: GameMainConsumer,
+        print: PrintEventConsumer,
     }
 }
 

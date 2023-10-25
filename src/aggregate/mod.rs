@@ -2,19 +2,22 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
-use uuid::Uuid;
 
-use crate::{Event, EventPayload};
+use crate::{Event, EventPayload, Uuid};
 
 pub mod manager;
 pub mod snapshot;
 
-/// A trait that defines the behavior of an aggregate.
+/// The `Aggregate` trait defines the behavior of an aggregate, which represent the state of a domain entity and can be modified by applying events.
 ///
-/// Aggregates are the building blocks of CQRS applications. They represent the state of a domain entity
-/// and can be mutated by applying events.
+/// Aggregates are a critical part of the `mini_cqrs_es` framework and must be implemented for each entity you want
+/// to work with. This trait provides the fundamental methods that an aggregate should support.
 ///
-/// This trait must be implemented by all aggregates in your application.
+/// ## Implementing the `Aggregate` Trait
+///
+/// To implement the `Aggregate` trait for your domain entities, you need to define the associated type `Event`,
+/// which represents the type of event that your aggregate can handle. The `Event` type should implement the
+/// `EventPayload` trait from `mini_cqrs_es`.
 #[async_trait]
 pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + DeserializeOwned {
     /// The type of event that this aggregate can handle.

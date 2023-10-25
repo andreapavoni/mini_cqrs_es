@@ -2,10 +2,9 @@ use async_trait::async_trait;
 
 use crate::{CqrsError, Repository};
 
-/// A trait that defines the behavior of a model reader.
+/// The `ModelReader` trait defines the behavior of a read model, it' responsible for updating read models with data extracted from events.
 ///
-/// A model reader is responsible for updating read models with data extracted from events.
-///
+/// This trait must be implemented by all model readers in your application.
 #[async_trait]
 pub trait ModelReader: Send {
     /// The associated repository type for this model reader.
@@ -18,6 +17,11 @@ pub trait ModelReader: Send {
     async fn update(&mut self, data: Self::Model) -> Result<(), CqrsError>;
 }
 
+/// The `QueriesRunner` trait defines the behavior for executing queries on read models.
+///
+/// When `impl`ed on a type, it allows you to execute queries and return results. It's used by
+/// `Cqrs` to handle queries, but it can also be useful for consumers or other parts of your
+/// application.
 #[async_trait]
 pub trait QueriesRunner {
     /// Executes a query and returns the result.
@@ -29,10 +33,9 @@ pub trait QueriesRunner {
     }
 }
 
-/// A trait representing a query on read models.
+/// The `Query` trait represents a query that allows to retrieve information from read models.
 ///
-/// Queries allow you to retrieve information from read models.
-///
+/// This trait must be implemented by all queries in your application.
 #[async_trait]
 pub trait Query: Send + Sync + Clone {
     /// The output type of the query.

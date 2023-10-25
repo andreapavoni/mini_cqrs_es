@@ -1,13 +1,14 @@
 use async_trait::async_trait;
-use uuid::Uuid;
 
-use crate::{Aggregate, CqrsError};
+use crate::{Aggregate, CqrsError, Uuid};
 
-/// A trait that defines the behavior of a snapshot store.
+/// The `SnapshotStore` trait defines the behavior for storing and loading aggregate snapshots.
 ///
-/// A snapshot store is responsible for storing and loading aggregate snapshots.
+/// Aggregate snapshots are a copy of an aggregate's state at a specific point in time, allowing for optimized
+/// loading of aggregates by reducing the need to replay all events from the beginning.
 ///
-/// This trait must be implemented by all snapshot stores in your application.
+/// To create your custom snapshot store, you need to implement this trait. The two main methods to implement are
+/// `save_snapshot` and `load_snapshot`, enabling you to define how snapshots are stored and loaded.
 #[async_trait]
 pub trait SnapshotStore {
     /// Saves an aggregate snapshot to the snapshot store.
@@ -21,9 +22,10 @@ pub trait SnapshotStore {
         T: Aggregate;
 }
 
-/// A struct that represents an aggregate snapshot.
+/// The `AggregateSnapshot` struct represents a snapshot of their wrapped aggregate.
 ///
-/// An aggregate snapshot is a copy of the state of an aggregate at a given point in time.
+/// An aggregate snapshot is created by serializing the state of an aggregate at a specific version. This structure
+/// contains information about the aggregate ID, the serialized payload, the version, and a marker for type safety.
 #[derive(Clone, Debug)]
 pub struct AggregateSnapshot<T>
 where

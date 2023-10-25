@@ -1,10 +1,11 @@
-name: Rust CI/release
+name: Rust
 
 on:
   push:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+    types: [merged]
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +23,6 @@ jobs:
       run: cargo run --example game
 
   release:
-    if: ${{ github.event.pull_request.merged }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
