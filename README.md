@@ -45,7 +45,7 @@ Or add the following line to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mini_cqrs_es = { git = "https://github.com/andreapavoni/mini_cqrs_es" }
+mini_cqrs_es = "0.7.0"
 ```
 
 ## Usage
