@@ -66,7 +66,7 @@ macro_rules! make_event_consumers_group {
         impl EventConsumersGroup for $GroupName {
             async fn process(&mut self, event: &Event) {
                 $(let $Field = self.$Field.process(event.clone());)*
-                futures::join!( $($Field,)*);
+                futures::join!($($Field,)*);
             }
         }
     };

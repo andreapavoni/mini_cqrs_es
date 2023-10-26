@@ -54,7 +54,7 @@ use crate::{
 /// let aggregate_id = Uuid::new_v4();
 /// let command = MyCommand;
 /// match cqrs.execute(aggregate_id, &command).await {
-///     Ok(()) => println!("Command executed successfully!"),
+///     Ok(_aggregate_id) => println!("Command executed successfully!"),
 ///     Err(err) => eprintln!("Error: {:?}", err),
 /// }
 /// ```
@@ -90,7 +90,7 @@ where
     }
 
     /// Executes a command on an aggregate.
-    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<(), CqrsError>
+    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<Uuid, CqrsError>
     where
         C: Command,
     {
@@ -112,7 +112,7 @@ where
             .store::<C::Aggregate>(&aggregate)
             .await?;
 
-        Ok(())
+        Ok(aggregate_id)
     }
 }
 
