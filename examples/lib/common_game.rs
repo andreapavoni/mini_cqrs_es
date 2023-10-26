@@ -81,7 +81,7 @@ pub struct CmdStartGame {
 
 #[async_trait]
 impl Command for CmdStartGame {
-    type Aggregate = GameState;
+    type Aggregate = GameAggregate;
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
         if aggregate.status != GameStatus::Playing {
@@ -110,7 +110,7 @@ pub struct CmdAttackPlayer {
 
 #[async_trait]
 impl Command for CmdAttackPlayer {
-    type Aggregate = GameState;
+    type Aggregate = GameAggregate;
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
         let mut player = if aggregate.player_1.id == self.attacker.id {
@@ -200,7 +200,7 @@ pub enum GameStatus {
 
 // Game aggregate
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GameState {
+pub struct GameAggregate {
     id: Uuid,
     player_1: Player,
     player_2: Player,
@@ -210,7 +210,7 @@ pub struct GameState {
 
 // We don't care about the default starting values, any placeholder will be ok, because the real
 // data will be loaded/stored when the game is started.
-impl Default for GameState {
+impl Default for GameAggregate {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -229,7 +229,7 @@ impl Default for GameState {
 }
 
 #[async_trait]
-impl Aggregate for GameState {
+impl Aggregate for GameAggregate {
     type Event = GameEvent;
 
     async fn apply(&mut self, event: &Self::Event) {
@@ -442,7 +442,33 @@ pub struct PrintEventConsumer {}
 #[async_trait]
 impl EventConsumer for PrintEventConsumer {
     async fn process(&mut self, event: Event) {
-        println!("PrintEventConsumer: {:#?}", event);
+        let payload: GameEvent = event.get_payload();
+
+        match payload {
+            GameEvent::GameStarted {
+                aggregate_id: _,
+                player_1,
+                player_2,
+                goal,
+            } => {
+                println!(
+                    "LOG: Game started. (Player 1: `{}`, Player 2: `{}`, Goal: `{}`)",
+                    player_1.id, player_2.id, goal
+                )
+            }
+            GameEvent::PlayerAttacked {
+                aggregate_id: _,
+                attacker,
+            } => {
+                println!("LOG: {} has attacked his opponent", attacker.id)
+            }
+            GameEvent::GameEndedWithWinner {
+                aggregate_id: _,
+                winner,
+            } => {
+                println!("LOG: Game ended with winner: {}", winner.id)
+            }
+        }
     }
 }
 

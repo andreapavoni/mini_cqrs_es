@@ -19,7 +19,7 @@ use common_game::*;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
-    let snapshot_store = InMemorySnapshotStore::<GameState>::new();
+    let snapshot_store = InMemorySnapshotStore::<GameAggregate>::new();
 
     let consumers = GameEventConsumersGroup {
         main: GameMainConsumer::new(repo.clone()),
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         points: 0,
     };
 
-    let main_id = Uuid::new_v4();
+    let aggregate_id = Uuid::new_v4();
 
     let start_cmd = CmdStartGame {
         player_1: player_1.clone(),
@@ -47,8 +47,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         goal: 3,
     };
 
-    cqrs.execute(main_id, &start_cmd).await?;
-    let q = GetGameQuery::new(main_id, repo.clone());
+    let result_id = cqrs.execute(aggregate_id, &start_cmd).await?;
+    assert_eq!(result_id, aggregate_id);
+    let q = GetGameQuery::new(aggregate_id, repo.clone());
     let result = cqrs.query(&q).await?.unwrap();
 
     assert_eq!(result.player_1.id, player_1.id);
@@ -58,12 +59,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let attack_cmd = CmdAttackPlayer {
         attacker: player_1.clone(),
     };
-    cqrs.execute(main_id, &attack_cmd).await?;
+    cqrs.execute(aggregate_id, &attack_cmd).await?;
     let result = cqrs.query(&q).await?.unwrap();
 
     verify_game_result(&result, 1, 0, 3, GameStatus::Playing);
 
-    cqrs.execute(main_id, &attack_cmd).await?;
+    cqrs.execute(aggregate_id, &attack_cmd).await?;
     let result = cqrs.query(&q).await?.unwrap();
 
     verify_game_result(&result, 2, 0, 3, GameStatus::Playing);
@@ -71,12 +72,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let attack_cmd_2 = CmdAttackPlayer {
         attacker: player_2.clone(),
     };
-    cqrs.execute(main_id, &attack_cmd_2).await?;
+    cqrs.execute(aggregate_id, &attack_cmd_2).await?;
     let result = cqrs.query(&q).await?.unwrap();
 
     verify_game_result(&result, 2, 1, 3, GameStatus::Playing);
 
-    cqrs.execute(main_id, &attack_cmd).await?;
+    cqrs.execute(aggregate_id, &attack_cmd).await?;
     let winner = Player {
         id: player_1.id.clone(),
         points: 3,
