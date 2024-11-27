@@ -16,7 +16,6 @@ mod aggregate;
 mod command;
 mod consumer;
 mod cqrs;
-mod error;
 mod events;
 mod query;
 mod repository;
@@ -30,7 +29,6 @@ pub use aggregate::{
 pub use command::Command;
 pub use consumer::{EventConsumer, EventConsumersGroup};
 pub use cqrs::Cqrs;
-pub use error::CqrsError;
 pub use events::{Event, EventPayload, EventStore};
 pub use query::{ModelReader, QueriesRunner, Query};
 pub use repository::Repository;

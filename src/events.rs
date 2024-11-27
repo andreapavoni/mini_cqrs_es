@@ -1,8 +1,9 @@
+use anyhow::Error;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{CqrsError, Uuid};
+use crate::Uuid;
 
 /// The `Event` struct represents a change to the state of an aggregate in a CQRS application.
 ///
@@ -13,7 +14,7 @@ use crate::{CqrsError, Uuid};
 ///
 /// You can extract the payload from an event using the `get_payload` method, which deserializes the payload data into a specific
 /// type that implements the `EventPayload` trait.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Event {
     /// The ID of the event.
     pub id: String,
@@ -97,7 +98,7 @@ pub trait EventPayload<Evt = Self>: Serialize + DeserializeOwned + Clone + ToStr
 /// associated with specific aggregate IDs.
 #[async_trait]
 pub trait EventStore: Send + Sync {
-    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), CqrsError>;
+    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), Error>;
 
-    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, CqrsError>;
+    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, Error>;
 }

@@ -4,9 +4,10 @@
 
 use std::collections::HashMap;
 
+use anyhow::{anyhow, Error};
 use async_trait::async_trait;
 
-use mini_cqrs_es::{CqrsError, Event, EventStore, Uuid};
+use mini_cqrs_es::{Event, EventStore, Uuid};
 
 // Event Store
 #[derive(Clone)]
@@ -24,7 +25,7 @@ impl InMemoryEventStore {
 
 #[async_trait]
 impl EventStore for InMemoryEventStore {
-    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), CqrsError> {
+    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), Error> {
         if let Some(current_events) = self.events.get_mut(&aggregate_id) {
             current_events.extend(events.to_vec());
         } else {
@@ -34,14 +35,11 @@ impl EventStore for InMemoryEventStore {
         Ok(())
     }
 
-    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, CqrsError> {
+    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, Error> {
         if let Some(events) = self.events.get(&aggregate_id) {
             Ok(events.to_vec())
         } else {
-            Err(CqrsError::new(format!(
-                "No events for aggregate id `{}`",
-                aggregate_id
-            )))
+            Err(anyhow!("No events for aggregate id `{}`", aggregate_id))
         }
     }
 }

@@ -4,13 +4,14 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use anyhow::{anyhow, Error};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use mini_cqrs_es::{
-    make_event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, CqrsError,
-    Event, EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
+    make_event_consumers_group, wrap_event, Aggregate, AggregateSnapshot, Command, Event,
+    EventConsumer, EventConsumersGroup, EventPayload, ModelReader, QueriesRunner, Query,
     Repository, SnapshotStore, Uuid,
 };
 
@@ -42,7 +43,7 @@ impl<A> SnapshotStore for InMemorySnapshotStore<A>
 where
     A: Aggregate,
 {
-    async fn save_snapshot<T>(&mut self, snapshot: AggregateSnapshot<T>) -> Result<(), CqrsError>
+    async fn save_snapshot<T>(&mut self, snapshot: AggregateSnapshot<T>) -> Result<(), Error>
     where
         T: Aggregate + Clone,
     {
@@ -54,7 +55,7 @@ where
         Ok(())
     }
 
-    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, CqrsError>
+    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, Error>
     where
         T: Aggregate + Clone,
     {
@@ -63,10 +64,7 @@ where
 
             Ok(AggregateSnapshot::new(&aggregate, None))
         } else {
-            Err(CqrsError::new(format!(
-                "No snapshot for aggregate id `{}`",
-                aggregate_id
-            )))
+            Err(anyhow!("No snapshot for aggregate id `{}`", aggregate_id))
         }
     }
 }
@@ -83,12 +81,12 @@ pub struct CmdStartGame {
 impl Command for CmdStartGame {
     type Aggregate = GameAggregate;
 
-    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, Error> {
         if aggregate.status != GameStatus::Playing {
-            return Err(CqrsError::new(format!(
+            return Err(anyhow!(
                 "Game is already finished with state {:?}",
                 aggregate.status
-            )));
+            ));
         }
 
         let res = vec![GameEvent::GameStarted {
@@ -112,7 +110,7 @@ pub struct CmdAttackPlayer {
 impl Command for CmdAttackPlayer {
     type Aggregate = GameAggregate;
 
-    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
+    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, Error> {
         let mut player = if aggregate.player_1.id == self.attacker.id {
             aggregate.player_1.clone()
         } else {
@@ -316,7 +314,7 @@ impl GetGameQuery {
 
 #[async_trait]
 impl Query for GetGameQuery {
-    type Output = Result<Option<GameModel>, CqrsError>;
+    type Output = Result<Option<GameModel>, Error>;
 
     async fn apply(&self) -> Self::Output {
         let result: Option<GameModel> = self.repo.lock().await.get_game(self.aggregate_id).await;
@@ -359,7 +357,7 @@ impl ModelReader for GameView {
     type Repo = InMemoryRepository;
     type Model = GameModel;
 
-    async fn update(&mut self, data: Self::Model) -> Result<(), CqrsError> {
+    async fn update(&mut self, data: Self::Model) -> Result<(), Error> {
         self.repo
             .lock()
             .await

@@ -1,7 +1,8 @@
 use crate::{
-    query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
-    EventStore, Uuid,
+    query::QueriesRunner, Aggregate, AggregateManager, Command, EventConsumersGroup, EventStore,
+    Uuid,
 };
+use anyhow::Error;
 
 /// The `Cqrs` struct represents the main entry point of a Command-Query Responsibility Segregation (CQRS) application.
 ///
@@ -12,7 +13,8 @@ use crate::{
 /// Here's an example of how to create and use a `Cqrs` instance in a CQRS application:
 ///
 /// ```rust
-/// use mini_cqrs_es::{Cqrs, AggregateManager, EventStore, EventConsumersGroup, Command, CqrsError, Uuid};
+/// use mini_cqrs_es::{Cqrs, AggregateManager, EventStore, EventConsumersGroup, Command, Uuid};
+/// use anyhow::Error;
 ///
 /// // Define custom aggregate manager, event store, and event consumers.
 /// struct MyAggregateManager;
@@ -38,7 +40,7 @@ use crate::{
 /// impl Command for MyCommand {
 ///     type Aggregate = MyAggregate;  // Replace with your own aggregate type
 ///
-///     async fn handle(&self, aggregate: &MyAggregate) -> Result<Vec<Event>, CqrsError> {
+///     async fn handle(&self, aggregate: &MyAggregate) -> Result<Vec<Event>, Error> {
 ///         // Implement command handling logic
 ///         unimplemented!()
 ///     }
@@ -90,7 +92,7 @@ where
     }
 
     /// Executes a command on an aggregate.
-    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<Uuid, CqrsError>
+    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<Uuid, Error>
     where
         C: Command,
     {

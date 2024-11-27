@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
-use crate::{Aggregate, CqrsError, Uuid};
+use crate::{Aggregate, Uuid};
+use anyhow::Error;
 
 /// The `SnapshotStore` trait defines the behavior for storing and loading aggregate snapshots.
 ///
@@ -12,12 +13,12 @@ use crate::{Aggregate, CqrsError, Uuid};
 #[async_trait]
 pub trait SnapshotStore {
     /// Saves an aggregate snapshot to the snapshot store.
-    async fn save_snapshot<T>(&mut self, aggregate: AggregateSnapshot<T>) -> Result<(), CqrsError>
+    async fn save_snapshot<T>(&mut self, aggregate: AggregateSnapshot<T>) -> Result<(), Error>
     where
         T: Aggregate;
 
     /// Loads an aggregate snapshot from the snapshot store.
-    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, CqrsError>
+    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, Error>
     where
         T: Aggregate;
 }

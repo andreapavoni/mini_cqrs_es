@@ -1,4 +1,5 @@
-use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore, Uuid};
+use crate::{Aggregate, AggregateSnapshot, EventStore, SnapshotStore, Uuid};
+use anyhow::Error;
 use async_trait::async_trait;
 
 /// The `AggregateManager` trait defines the behavior for loading and storing the state of aggregates.
@@ -9,12 +10,12 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait AggregateManager: Clone + Send + Sync {
     /// Loads an aggregate from the event store.
-    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, CqrsError>
+    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, Error>
     where
         A: Aggregate + Clone;
 
     /// Stores an aggregate to the event store.
-    async fn store<A>(&mut self, _aggregate: &A) -> Result<(), CqrsError>
+    async fn store<A>(&mut self, _aggregate: &A) -> Result<(), Error>
     where
         A: Aggregate + Clone,
     {
@@ -47,7 +48,7 @@ impl<'a, ES> AggregateManager for SimpleAggregateManager<'a, ES>
 where
     ES: EventStore + Clone,
 {
-    async fn load<A: Aggregate>(&mut self, aggregate_id: Uuid) -> Result<A, CqrsError> {
+    async fn load<A: Aggregate>(&mut self, aggregate_id: Uuid) -> Result<A, Error> {
         let mut aggregate = A::default();
         aggregate.set_aggregate_id(aggregate_id);
 
@@ -87,7 +88,7 @@ impl<SS> AggregateManager for SnapshotAggregateManager<SS>
 where
     SS: SnapshotStore + Clone + Send + Sync,
 {
-    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, CqrsError>
+    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, Error>
     where
         A: Aggregate + Clone,
     {
@@ -100,7 +101,7 @@ where
         }
     }
 
-    async fn store<A>(&mut self, aggregate: &A) -> Result<(), CqrsError>
+    async fn store<A>(&mut self, aggregate: &A) -> Result<(), Error>
     where
         A: Aggregate + Clone,
     {
