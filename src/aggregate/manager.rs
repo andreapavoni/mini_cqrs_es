@@ -27,35 +27,39 @@ pub trait AggregateManager: Clone + Send + Sync {
 /// by replaying their events from the associated `EventStore`, but doesn't implement any storage logic.
 ///
 #[derive(Clone)]
-pub struct SimpleAggregateManager<'a, ES>
+pub struct SimpleAggregateManager<ES>
 where
-    ES: EventStore,
+    ES: EventStore + Send + Sync,
 {
-    event_store: &'a ES,
+    event_store: ES,
 }
 
-impl<'a, ES> SimpleAggregateManager<'a, ES>
+impl<ES> SimpleAggregateManager<ES>
 where
-    ES: EventStore,
+    ES: EventStore + Send + Sync,
 {
-    pub fn new(event_store: &'a ES) -> Self {
+    pub fn new(event_store: ES) -> Self {
         Self { event_store }
     }
 }
 
 #[async_trait]
-impl<'a, ES> AggregateManager for SimpleAggregateManager<'a, ES>
+impl<ES> AggregateManager for SimpleAggregateManager<ES>
 where
-    ES: EventStore + Clone,
+    // Add necessary bounds: ES must be Clone to be used in Cqrs::new if manager is cloned,
+    // Send + Sync likely needed because load is async.
+    ES: EventStore + Clone + Send + Sync + 'static, // Add 'static if needed by async trait bounds
 {
-    async fn load<A: Aggregate>(&mut self, aggregate_id: Uuid) -> Result<A, Error> {
-        let mut aggregate = A::default();
-        aggregate.set_aggregate_id(aggregate_id);
+    async fn load<A>(&mut self, aggregate_id: Uuid) -> Result<A, Error>
+    where
+        A: Aggregate + Clone, // Add Send + Sync to A if needed by apply_events
+    {
+        let events = self.event_store.load_events(aggregate_id).await?;
 
-        if let Ok(events) = self.event_store.load_events(aggregate_id).await {
-            aggregate.apply_events(&events).await;
-            return Ok(aggregate);
-        }
+        let mut aggregate = A::default();
+        aggregate.set_aggregate_id(aggregate_id); // Set ID before applying events
+
+        aggregate.apply_events(&events).await; // Apply loaded events
 
         Ok(aggregate)
     }
