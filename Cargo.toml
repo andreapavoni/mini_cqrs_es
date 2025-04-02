@@ -24,3 +24,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 anyhow = "1.0.93"
+thiserror = "2.0"

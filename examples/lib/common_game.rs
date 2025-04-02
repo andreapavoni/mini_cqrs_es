@@ -388,46 +388,46 @@ impl QueriesRunner for GameMainConsumer {}
 #[async_trait]
 impl EventConsumer for GameMainConsumer {
     async fn process(&mut self, evt: Event) {
-        let event = evt.get_payload();
-
-        match event {
-            GameEvent::GameStarted {
-                aggregate_id,
-                player_1,
-                player_2,
-                goal,
-            } => {
-                let model = GameModel {
-                    id: aggregate_id,
-                    player_1: player_1.clone(),
-                    player_2: player_2.clone(),
+        if let Ok(event) = evt.get_payload() {
+            match event {
+                GameEvent::GameStarted {
+                    aggregate_id,
+                    player_1,
+                    player_2,
                     goal,
-                    status: GameStatus::Playing,
-                };
-                _ = self.game_model.update(model).await;
-            }
-            GameEvent::PlayerAttacked {
-                aggregate_id,
-                attacker,
-            } => {
-                let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.query(&q).await {
-                    if model.player_1.id == attacker.id {
-                        model.player_1.points += 1;
-                    } else {
-                        model.player_2.points += 1;
+                } => {
+                    let model = GameModel {
+                        id: aggregate_id,
+                        player_1: player_1.clone(),
+                        player_2: player_2.clone(),
+                        goal,
+                        status: GameStatus::Playing,
                     };
                     _ = self.game_model.update(model).await;
                 }
-            }
-            GameEvent::GameEndedWithWinner {
-                aggregate_id,
-                winner,
-            } => {
-                let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
-                if let Ok(Some(mut model)) = self.query(&q).await {
-                    model.status = GameStatus::Winner(winner.clone());
-                    _ = self.game_model.update(model).await;
+                GameEvent::PlayerAttacked {
+                    aggregate_id,
+                    attacker,
+                } => {
+                    let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
+                    if let Ok(Some(mut model)) = self.query(&q).await {
+                        if model.player_1.id == attacker.id {
+                            model.player_1.points += 1;
+                        } else {
+                            model.player_2.points += 1;
+                        };
+                        _ = self.game_model.update(model).await;
+                    }
+                }
+                GameEvent::GameEndedWithWinner {
+                    aggregate_id,
+                    winner,
+                } => {
+                    let q = GetGameQuery::new(aggregate_id, self.game_model.repo());
+                    if let Ok(Some(mut model)) = self.query(&q).await {
+                        model.status = GameStatus::Winner(winner.clone());
+                        _ = self.game_model.update(model).await;
+                    }
                 }
             }
         }
@@ -440,31 +440,31 @@ pub struct PrintEventConsumer {}
 #[async_trait]
 impl EventConsumer for PrintEventConsumer {
     async fn process(&mut self, event: Event) {
-        let payload: GameEvent = event.get_payload();
-
-        match payload {
-            GameEvent::GameStarted {
-                aggregate_id: _,
-                player_1,
-                player_2,
-                goal,
-            } => {
-                println!(
-                    "LOG: Game started. (Player 1: `{}`, Player 2: `{}`, Goal: `{}`)",
-                    player_1.id, player_2.id, goal
-                )
-            }
-            GameEvent::PlayerAttacked {
-                aggregate_id: _,
-                attacker,
-            } => {
-                println!("LOG: {} has attacked his opponent", attacker.id)
-            }
-            GameEvent::GameEndedWithWinner {
-                aggregate_id: _,
-                winner,
-            } => {
-                println!("LOG: Game ended with winner: {}", winner.id)
+        if let Ok(payload) = event.get_payload() {
+            match payload {
+                GameEvent::GameStarted {
+                    aggregate_id: _,
+                    player_1,
+                    player_2,
+                    goal,
+                } => {
+                    println!(
+                        "LOG: Game started. (Player 1: `{}`, Player 2: `{}`, Goal: `{}`)",
+                        player_1.id, player_2.id, goal
+                    )
+                }
+                GameEvent::PlayerAttacked {
+                    aggregate_id: _,
+                    attacker,
+                } => {
+                    println!("LOG: {} has attacked his opponent", attacker.id)
+                }
+                GameEvent::GameEndedWithWinner {
+                    aggregate_id: _,
+                    winner,
+                } => {
+                    println!("LOG: Game ended with winner: {}", winner.id)
+                }
             }
         }
     }

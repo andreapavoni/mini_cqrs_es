@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::Uuid;
+use crate::{CqrsError, Uuid};
 
 /// The `Event` struct represents a change to the state of an aggregate in a CQRS application.
 ///
@@ -52,8 +52,8 @@ impl Event {
     }
 
     /// Gets the payload of the event.
-    pub fn get_payload<T: EventPayload>(&self) -> T {
-        serde_json::from_value(self.payload.clone()).unwrap()
+    pub fn get_payload<T: EventPayload>(&self) -> Result<T, CqrsError> {
+        serde_json::from_value(self.payload.clone()).map_err(CqrsError::PayloadDeserialization)
     }
 }
 
@@ -66,7 +66,7 @@ macro_rules! wrap_event {
     ($evt: ident) => {
         impl From<Event> for $evt {
             fn from(evt: Event) -> Self {
-                evt.get_payload::<$evt>()
+                evt.get_payload::<$evt>().unwrap()
             }
         }
 

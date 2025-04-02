@@ -35,7 +35,9 @@ pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + Deseria
     /// Applies a sequence of events to the aggregate's state.
     async fn apply_events(&mut self, events: &[Event]) {
         for e in events.iter() {
-            self.apply(&e.get_payload::<Self::Event>()).await;
+            if let Ok(payload) = e.get_payload::<Self::Event>() {
+                self.apply(&payload).await;
+            }
         }
     }
 }
