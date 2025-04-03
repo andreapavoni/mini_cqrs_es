@@ -1,10 +1,10 @@
-use std::fmt::Debug;
-use tokio::sync::mpsc; // For the sender type
-
 use crate::{
-    query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
-    EventStore, Result, Uuid,
+    Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup, EventStore,
+    QueriesRunner, Result, Uuid,
 };
+
+use std::fmt::Debug;
+use tokio::sync::mpsc;
 
 // use crate::{
 //     query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
@@ -73,15 +73,14 @@ pub struct Cqrs<ES, EC, AM, Ctx, M>
 where
     AM: AggregateManager,
     ES: EventStore,
-    EC: EventConsumersGroup<M>, // Group processes events returning Vec<M>
+    EC: EventConsumersGroup<M, Ctx>, // Group now generic over M and Ctx
     Ctx: Send + Sync + Clone + 'static,
-    M: Send + Debug + 'static, // Command message type for the bus/channel
+    M: Send + Debug + 'static,
 {
     aggregate_manager: AM,
     event_store: ES,
     consumers: EC,
     context: Ctx,
-    // Holds the sender for the external command processing loop
     command_sender: mpsc::Sender<M>,
 }
 
@@ -89,7 +88,7 @@ impl<ES, EC, AM, Ctx, M> Cqrs<ES, EC, AM, Ctx, M>
 where
     AM: AggregateManager + Send + Sync + Clone,
     ES: EventStore + Send + Sync + Clone,
-    EC: EventConsumersGroup<M> + Send + Sync + Clone, // Bounds for Group<M>
+    EC: EventConsumersGroup<M, Ctx> + Send + Sync + Clone, // Updated bounds
     Ctx: Send + Sync + Clone + 'static,
     M: Send + Debug + 'static,
 {
@@ -115,7 +114,6 @@ where
     where
         C: Command<Ctx> + Send + Sync,
         C::Aggregate: Aggregate + Send + Sync + 'static,
-        // No direct constraint on Aggregate::Event needed here anymore
     {
         // 1. Load aggregate & get current version
         let mut aggregate = self
@@ -167,12 +165,12 @@ where
             // 5. Apply events locally
             aggregate.apply_events(&versioned_events).await;
 
-            // 6. Process events via consumers and collect commands to dispatch
+            // --- 6. Process events via consumers (Pass Context) ---
             let mut commands_to_dispatch = Vec::new();
             for event in versioned_events.iter() {
-                // consumers.process now returns Result<Vec<M>>
-                // TODO: Pass context if consumer process signature changes
-                let mut dispatched_by_consumers = self.consumers.process(event).await?;
+                // Pass context reference to consumers.process
+                let mut dispatched_by_consumers =
+                    self.consumers.process(event, &self.context).await?;
                 commands_to_dispatch.append(&mut dispatched_by_consumers);
             }
 
@@ -191,17 +189,13 @@ where
 
         Ok(aggregate_id)
     }
-
-    // run_command_processor method is NOT part of Cqrs struct anymore.
-    // The application's main loop runs the receiver.
 }
 
-// Implement QueriesRunner trait (no change needed)
 impl<ES, EC, AM, Ctx, M> QueriesRunner for Cqrs<ES, EC, AM, Ctx, M>
 where
     AM: AggregateManager + Send + Sync + Clone,
     ES: EventStore + Send + Sync + Clone,
-    EC: EventConsumersGroup<M> + Send + Sync + Clone,
+    EC: EventConsumersGroup<M, Ctx> + Send + Sync + Clone,
     Ctx: Send + Sync + Clone + 'static,
     M: Send + Debug + 'static,
 {

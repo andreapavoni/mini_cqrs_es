@@ -6,16 +6,15 @@ use crate::{Event, Result};
 /// The `EventConsumer` trait defines the behavior of an event consumer, which is responsible for processing events.
 ///
 /// This trait must be implemented by all event consumers in your application.
+
 #[async_trait]
-pub trait EventConsumer<M>: Send + Sync + 'static
-// Consumer is generic over message type M
+pub trait EventConsumer<M, Ctx = ()>: Send + Sync + 'static
 where
     M: Send + Debug + 'static,
+    Ctx: Send + Sync + 'static,
 {
-    /// Process an event and return a list of commands (wrapped in type M) to be dispatched.
-    async fn process(&mut self, event: &Event) -> Result<Vec<M>>;
-    // Context can still be added later if needed:
-    // async fn process(&mut self, event: &Event, ctx: &Ctx) -> Result<Vec<M>>;
+    /// Process an event, potentially using context, and return commands to dispatch.
+    async fn process(&mut self, event: &Event, ctx: &Ctx) -> Result<Vec<M>>;
 }
 
 /// The `EventConsumersGroup` trait defines the behavior to process events through multiple consumers.
@@ -52,24 +51,20 @@ where
 ///     consumer_one: MyEventConsumer {},
 /// };
 /// ```
-
 #[async_trait]
-pub trait EventConsumersGroup<M>: Send + Sync + 'static
-// Group is generic over message type M
+pub trait EventConsumersGroup<M, Ctx = ()>: Send + Sync + 'static
 where
     M: Send + Debug + 'static,
+    Ctx: Send + Sync + 'static,
 {
-    /// Process an event through all consumers and collect commands to dispatch.
-    async fn process(&mut self, event: &Event) -> Result<Vec<M>>;
-    // Context can still be added later if needed
-    // async fn process(&mut self, event: &Event, ctx: &Ctx) -> Result<Vec<M>>;
+    /// Process an event through all consumers, passing context, and collect commands.
+    async fn process(&mut self, event: &Event, ctx: &Ctx) -> Result<Vec<M>>;
 }
 
-/// Macro updated to collect results (Vec<M>) from consumers.
 #[macro_export]
 macro_rules! make_event_consumers_group {
     (
-        $GroupName:ident< $MessageType:ty > { // Added generic message type parameter
+        $GroupName:ident< $MessageType:ty, $ContextType:ty > {
             $($Field:ident: $Consumer:ty),* $(,)?
         }
     ) => {
@@ -79,20 +74,23 @@ macro_rules! make_event_consumers_group {
         }
 
         #[async_trait]
-        // Implement trait with the specified message type
-        impl $crate::EventConsumersGroup<$MessageType> for $GroupName
-        where $MessageType: Send + std::fmt::Debug + 'static // Add necessary bounds for M
+        // Implement trait with the specified message and context types
+        impl $crate::EventConsumersGroup<$MessageType, $ContextType> for $GroupName
+        where
+            $MessageType: Send + std::fmt::Debug + 'static,
+            $ContextType: Send + Sync + 'static, // Add bounds for Ctx
+            // Ensure consumers implement the correct trait with context
+            $($Consumer: $crate::EventConsumer<$MessageType, $ContextType>,)*
         {
-            // Updated signature to return Result<Vec<M>>
-            async fn process(&mut self, event: &Event) -> $crate::Result<Vec<$MessageType>> {
-                // Create futures for each consumer's process method
-                // Consumers must implement EventConsumer<M>
+            // Updated signature to accept context
+            async fn process(&mut self, event: &Event, ctx: &$ContextType) -> $crate::Result<Vec<$MessageType>> {
+                // Create futures for each consumer's process method, passing context
                 let futures = vec![
-                    $(self.$Field.process(event),)*
+                    // Pass context reference to each consumer's process method
+                    $(self.$Field.process(event, ctx),)*
                 ];
 
                 // Use try_join_all to await all futures and propagate the first error
-                // This returns Vec<Result<Vec<M>>> effectively, we need Vec<Vec<M>> then flatten
                 let results: Vec<Vec<$MessageType>> = futures::future::try_join_all(futures).await?;
 
                 // Flatten the Vec<Vec<M>> into Vec<M>
@@ -100,9 +98,6 @@ macro_rules! make_event_consumers_group {
 
                 Ok(commands_to_dispatch) // Return collected commands
             }
-
-            // TODO: Add context passing if EventConsumer::process adds it
-            // async fn process(&mut self, event: &Event, ctx: &Ctx) -> Result<Vec<M>> { ... }
         }
     };
 }
