@@ -1,7 +1,5 @@
-use anyhow::Error;
+use crate::{Aggregate, Event, Result};
 use async_trait::async_trait;
-
-use crate::{Aggregate, Event};
 
 /// The `Command` trait defines the behavior of a command in a Command-Query Responsibility Segregation (CQRS) application.
 ///
@@ -34,11 +32,16 @@ use crate::{Aggregate, Event};
 /// }
 /// ```
 ///
-#[async_trait]
-pub trait Command {
-    /// The type of aggregate that this command handles.
-    type Aggregate: Aggregate;
 
-    /// Handles the command and returns a list of events.
-    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, Error>;
+#[async_trait]
+// Define Ctx as a generic parameter with a default
+pub trait Command<Ctx = ()>: Send + Sync
+where
+    Ctx: Send + Sync + 'static,
+{
+    type Aggregate: Aggregate + Send + Sync; // Ensure aggregate is Send+Sync
+
+    /// Handles the command using the aggregate's current state and external context.
+    /// Returns a list of events generated or a CqrsError.
+    async fn handle(&self, aggregate: &Self::Aggregate, ctx: &Ctx) -> Result<Vec<Event>>; // Use Ctx generic param
 }

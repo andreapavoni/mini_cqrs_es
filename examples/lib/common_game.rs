@@ -81,7 +81,7 @@ pub struct CmdStartGame {
 impl Command for CmdStartGame {
     type Aggregate = GameAggregate;
 
-    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, Error> {
+    async fn handle(&self, aggregate: &Self::Aggregate, ctx: ()) -> Result<Vec<Event>, Error> {
         if aggregate.status != GameStatus::Playing {
             return Err(anyhow!(
                 "Game is already finished with state {:?}",

@@ -30,7 +30,7 @@ pub use aggregate::{
 pub use command::Command;
 pub use consumer::{EventConsumer, EventConsumersGroup};
 pub use cqrs::Cqrs;
-pub use error::CqrsError;
+pub use error::{CqrsError, Result};
 pub use events::{Event, EventPayload, EventStore};
 pub use query::{ModelReader, QueriesRunner, Query};
 pub use repository::Repository;

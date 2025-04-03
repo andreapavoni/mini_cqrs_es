@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 
-    let mut cqrs = Cqrs::new(aggregate_manager, store, consumers);
+    let mut cqrs = Cqrs::new(aggregate_manager, store, consumers, ());
 
     let player_1 = Player {
         id: "player_1".to_string(),

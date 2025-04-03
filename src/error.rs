@@ -1,14 +1,17 @@
-// In mini_cqrs_es library (e.g., src/error.rs)
 use thiserror::Error;
-use uuid::Uuid; // Assuming Uuid is used elsewhere
+use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum CqrsError {
     #[error("Failed to deserialize event payload: {0}")]
-    PayloadDeserialization(#[from] serde_json::Error), // Auto-wrap serde_json::Error
+    PayloadDeserialization(#[from] serde_json::Error),
 
-    #[error("Event store operation failed: {0}")]
-    StoreOperation(String), // Example for store errors
+    #[error("Event store operation failed for aggregate {aggregate_id}: {source}")]
+    StoreOperation {
+        aggregate_id: Uuid,
+        #[source]
+        source: anyhow::Error, // Source is anyhow::Error
+    },
 
     #[error("Concurrency conflict for aggregate {aggregate_id}: expected version {expected}, found {actual}")]
     Concurrency {
@@ -20,14 +23,19 @@ pub enum CqrsError {
     #[error("Aggregate '{0}' not found")]
     AggregateNotFound(Uuid),
 
-    #[error("Snapshot error: {0}")]
-    Snapshot(String),
+    #[error("Command validation failed for aggregate {aggregate_id}: {reason}")]
+    CommandValidation { aggregate_id: Uuid, reason: String },
 
-    #[error("Generic error: {0}")]
-    Generic(#[from] anyhow::Error), // Can wrap anyhow if needed elsewhere
+    #[error("Snapshot operation failed: {0}")]
+    Snapshot(String), // Or wrap specific snapshot errors
 
-                                    // Add other specific error variants as needed
+    #[error("Command dispatch failed: {0}")]
+    CommandDispatch(String),
+
+    // Changed Generic to wrap anyhow::Error directly using #[from]
+    #[error("Generic CQRS error: {0}")]
+    Generic(#[from] anyhow::Error),
 }
 
-// Make it compatible with functions returning anyhow::Error if desired
-// impl From<CqrsError> for anyhow::Error { ... }
+// Result alias within the library
+pub type Result<T, E = CqrsError> = std::result::Result<T, E>;
