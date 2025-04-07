@@ -29,7 +29,10 @@ pub struct Event {
     payload: serde_json::Value,
 
     /// The version of the event.
-    pub version: u64,
+    pub version: u32,
+
+    /// The progression number of the event.
+    pub sequence_number: Option<u64>,
 
     /// The timestamp of the event.
     pub timestamp: DateTime<Utc>,
@@ -37,7 +40,7 @@ pub struct Event {
 
 impl Event {
     /// Creates a new event.
-    pub fn new<T: EventPayload>(payload: T, version: Option<u64>) -> Self {
+    pub fn new<T: EventPayload>(payload: T, version: Option<u32>) -> Self {
         let version = version.unwrap_or(1);
         let timestamp = Utc::now();
 
@@ -47,6 +50,7 @@ impl Event {
             aggregate_id: payload.aggregate_id(),
             payload: serde_json::to_value(payload).unwrap(),
             version,
+            sequence_number: None,
             timestamp,
         }
     }
