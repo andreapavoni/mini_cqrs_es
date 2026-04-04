@@ -15,7 +15,7 @@ mod common_game;
 use common_game::*;
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> mini_cqrs_es::anyhow::Result<()> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
     let snapshot_store = InMemorySnapshotStore::<GameAggregate>::new();
