@@ -6,29 +6,27 @@
 /// cargo run --example game
 /// ```
 ///
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use mini_cqrs_es::{Cqrs, QueriesRunner, SnapshotAggregateManager, Uuid};
-use tokio::sync::Mutex;
+use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SnapshotAggregateManager, Uuid};
 
 #[path = "lib/common_game.rs"]
 mod common_game;
 use common_game::*;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = InMemoryEventStore::new();
     let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
     let snapshot_store = InMemorySnapshotStore::<GameAggregate>::new();
 
-    let consumers = GameEventConsumersGroup {
-        main: GameMainConsumer::new(repo.clone()),
-        print: PrintEventConsumer {},
-    };
+    let consumers = EventConsumers::new()
+        .with(GameMainConsumer::new(repo.clone()))
+        .with(PrintEventConsumer {});
 
     let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 
-    let mut cqrs = Cqrs::new(aggregate_manager, store, consumers);
+    let cqrs = Cqrs::new(aggregate_manager, store, consumers);
 
     let player_1 = Player {
         id: "player_1".to_string(),

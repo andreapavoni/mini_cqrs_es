@@ -1,43 +1,35 @@
-use async_trait::async_trait;
+use std::future::Future;
 
-use crate::{Aggregate, CqrsError, Event};
+use crate::{Aggregate, CqrsError};
 
-/// The `Command` trait defines the behavior of a command in a Command-Query Responsibility Segregation (CQRS) application.
+/// The `Command` trait defines the behavior of a command in a CQRS application.
 ///
-/// A command is a request to change the state of an aggregate. Commands are handled by the aggregate itself, and they return
-/// a list of events that describe the state changes. These events are used to update the aggregate's state and are subsequently
-/// stored.
-///
-/// ## Implementing the `Command` Trait
-///
-/// To create a command in your application, you need to implement this trait for each specific command type. You should specify
-/// the type of the aggregate that the command handles in the associated `type` and implement the `handle` method to define how the
-/// command is processed.
+/// A command is a request to change the state of an aggregate. Commands are handled by the
+/// aggregate itself, and they return a list of domain events that describe the state changes.
+/// The framework wraps these into `Event` structs with the aggregate ID and version.
 ///
 /// ## Example
 ///
-/// Here's a basic example of implementing the `Command` trait for a specific command type:
+/// ```rust,ignore
+/// use mini_cqrs_es::{Command, CqrsError};
 ///
-/// ```rust
-/// use mini_cqrs_es::{Command, Aggregate, CqrsError, Event};
+/// struct CreateUser { name: String }
 ///
-/// struct MyCommand;
+/// impl Command for CreateUser {
+///     type Aggregate = UserAggregate;
 ///
-/// impl Command for MyCommand {
-///     type Aggregate = MyAggregate;
-///
-///     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError> {
-///         // Implement your command logic here.
-///         unimplemented!()
+///     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<UserEvent>, CqrsError> {
+///         Ok(vec![UserEvent::UserCreated { name: self.name.clone() }])
 ///     }
 /// }
 /// ```
-///
-#[async_trait]
-pub trait Command {
+pub trait Command: Send + Sync {
     /// The type of aggregate that this command handles.
     type Aggregate: Aggregate;
 
-    /// Handles the command and returns a list of events.
-    async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<Event>, CqrsError>;
+    /// Handles the command and returns a list of domain events.
+    fn handle(
+        &self,
+        aggregate: &Self::Aggregate,
+    ) -> impl Future<Output = Result<Vec<<Self::Aggregate as Aggregate>::Event>, CqrsError>> + Send;
 }

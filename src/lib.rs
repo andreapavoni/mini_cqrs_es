@@ -1,37 +1,46 @@
 //! # MiniCQRS/ES
 //!
-//! MiniCQRS/ES is a Rust library that simplifies the implementation of the Command-Query Responsibility Segregation (CQRS) architectural pattern in your application.
+//! MiniCQRS/ES is a Rust library that simplifies the implementation of the Command-Query
+//! Responsibility Segregation (CQRS) architectural pattern in your application.
 //!
 //! ## Key Features
 //!
 //! - Provides traits for defining aggregates, commands, and event consumers.
-//! - Manages aggregates' state and events handling.
+//! - Manages aggregates' state and events handling with optimistic concurrency.
 //! - Supports event stores and snapshot stores.
 //! - Supports queries on read models.
-//! - Extreme flexibility and extensibility by implementing traits.
+//! - All trait methods take `&self` for easy concurrent usage.
+//! - No `async_trait` dependency — uses native async fn in traits.
 //!
 //! For more detailed documentation, refer to the specific modules and types provided by MiniCQRS/ES.
 
-mod aggregate;
-mod command;
-mod consumer;
-mod cqrs;
-mod error;
-mod events;
-mod query;
-mod repository;
+pub use ::anyhow;
+pub use uuid::Uuid;
 
+mod error;
+pub use error::CqrsError;
+
+mod events;
+pub use events::{Event, EventPayload, EventStore};
+
+mod aggregate;
 pub use aggregate::{
     manager::{AggregateManager, SimpleAggregateManager, SnapshotAggregateManager},
     snapshot::{AggregateSnapshot, SnapshotStore},
     Aggregate,
 };
 
+mod command;
 pub use command::Command;
-pub use consumer::{EventConsumer, EventConsumersGroup};
+
+mod consumer;
+pub use consumer::{EventConsumer, EventConsumers};
+
+mod cqrs;
 pub use cqrs::Cqrs;
-pub use error::CqrsError;
-pub use events::{Event, EventPayload, EventStore};
-pub use query::{ModelReader, QueriesRunner, Query};
+
+mod query;
+pub use query::{Query, QueryRunner};
+
+mod repository;
 pub use repository::Repository;
-pub use uuid::Uuid;

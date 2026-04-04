@@ -1,73 +1,69 @@
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::Event;
 
-/// The `EventConsumer` trait defines the behavior of an event consumer, which is responsible for processing events.
+/// The `EventConsumer` trait defines the behavior of an event consumer, which is responsible
+/// for processing events (e.g., updating read models, sending notifications).
 ///
-/// This trait must be implemented by all event consumers in your application.
-#[async_trait]
-pub trait EventConsumer: Send + Sync + 'static {
-    async fn process(&mut self, event: Event);
+/// Methods take `&self` to allow concurrent access.
+pub trait EventConsumer: Send + Sync {
+    fn process(&self, event: &Event) -> impl Future<Output = ()> + Send;
 }
 
-/// The `EventConsumersGroup` trait defines the behavior to process events through multiple consumers.
+// Internal dyn-compatible wrapper so we can store consumers in a Vec<Box<dyn ...>>.
+trait DynEventConsumer: Send + Sync {
+    fn process_dyn<'a>(
+        &'a self,
+        event: &'a Event,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+}
+
+impl<T: EventConsumer> DynEventConsumer for T {
+    fn process_dyn<'a>(
+        &'a self,
+        event: &'a Event,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(EventConsumer::process(self, event))
+    }
+}
+
+/// A collection of event consumers that processes events through all of them.
 ///
-/// This trait is usually implemented when using the `make_event_consumers_group!` macro.
+/// Use the builder pattern to add consumers:
 ///
-/// The individual consumers in the group can be set up as fields within the struct.
-///
-/// ## Example
-///
-/// Here's an example of using the `make_event_consumers_group!` macro and later using the created `EventConsumersGroup`:
-///
-/// ```rust
-/// use mini_cqrs_es::{EventConsumer, Event, EventConsumersGroup, make_event_consumers_group};
-///
-/// struct MyEventConsumer;
-///
-/// #[async_trait::async_trait]
-/// impl EventConsumer for MyEventConsumer {
-///     async fn process(&mut self, event: Event) {
-///         // Implement the logic to process the event
-///         unimplemented!()
-///     }
-/// }
-///
-/// make_event_consumers_group! {
-///     MyEventConsumersGroup {
-///         consumer_one: MyEventConsumer,
-///     }
-/// }
-///
-/// // Later in the code where you want to use MyEventConsumersGroup
-/// let consumers = MyEventConsumersGroup {
-///     consumer_one: MyEventConsumer {},
-/// };
+/// ```rust,ignore
+/// let consumers = EventConsumers::new()
+///     .with(MyConsumer::new())
+///     .with(LoggingConsumer {});
 /// ```
-#[async_trait]
-pub trait EventConsumersGroup: Send + Sync + 'static {
-    async fn process(&mut self, event: &Event);
+pub struct EventConsumers {
+    consumers: Vec<Box<dyn DynEventConsumer>>,
 }
 
-/// A macro that simplifies the creation of a type that implements the `EventConsumersGroup` trait.
-#[macro_export]
-macro_rules! make_event_consumers_group {
-    (
-        $GroupName:ident {
-            $($Field:ident: $Consumer:ident),* $(,)?
+impl EventConsumers {
+    pub fn new() -> Self {
+        Self {
+            consumers: Vec::new(),
         }
-    ) => {
-        #[derive(Clone)]
-        pub struct $GroupName {
-            $(pub $Field: $Consumer,)*
-        }
+    }
 
-        #[async_trait]
-        impl EventConsumersGroup for $GroupName {
-            async fn process(&mut self, event: &Event) {
-                $(let $Field = self.$Field.process(event.clone());)*
-                futures::join!($($Field,)*);
-            }
+    /// Adds a consumer to the group.
+    pub fn with(mut self, consumer: impl EventConsumer + 'static) -> Self {
+        self.consumers.push(Box::new(consumer));
+        self
+    }
+
+    /// Processes an event through all consumers sequentially.
+    pub async fn process(&self, event: &Event) {
+        for consumer in &self.consumers {
+            consumer.process_dyn(event).await;
         }
-    };
+    }
+}
+
+impl Default for EventConsumers {
+    fn default() -> Self {
+        Self::new()
+    }
 }

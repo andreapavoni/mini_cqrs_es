@@ -1,87 +1,31 @@
 use crate::{
-    query::QueriesRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumersGroup,
+    query::QueryRunner, Aggregate, AggregateManager, Command, CqrsError, Event, EventConsumers,
     EventStore, Uuid,
 };
 
-/// The `Cqrs` struct represents the main entry point of a Command-Query Responsibility Segregation (CQRS) application.
+/// The `Cqrs` struct represents the main entry point of a CQRS application.
 ///
-/// CQRS is an architectural pattern that separates the reading and writing sides of an application to achieve better performance, scalability, and maintainability. The `Cqrs` type acts as a core component, providing a structure for handling commands, queries, and event processing.
+/// It orchestrates command execution: loading the aggregate, handling the command,
+/// saving events (with optimistic concurrency), processing consumers, and storing the aggregate.
 ///
-/// ## Example
-///
-/// Here's an example of how to create and use a `Cqrs` instance in a CQRS application:
-///
-/// ```rust
-/// use mini_cqrs_es::{Cqrs, AggregateManager, EventStore, EventConsumersGroup, Command, CqrsError, Uuid};
-///
-/// // Define custom aggregate manager, event store, and event consumers.
-/// struct MyAggregateManager;
-/// struct MyEventStore;
-/// struct MyEventConsumers;
-///
-/// // Implement the necessary traits for these components.
-/// impl AggregateManager for MyAggregateManager {
-///     // Implement the methods of AggregateManager
-/// }
-/// impl EventStore for MyEventStore {
-///     // Implement the methods of EventStore
-/// }
-/// impl EventConsumersGroup for MyEventConsumers {
-///     // Implement the methods of EventConsumersGroup
-/// }
-///
-/// // Define a custom command type.
-/// struct MyCommand;
-///
-/// // Implement the Command trait for the custom command.
-/// #[async_trait::async_trait]
-/// impl Command for MyCommand {
-///     type Aggregate = MyAggregate;  // Replace with your own aggregate type
-///
-///     async fn handle(&self, aggregate: &MyAggregate) -> Result<Vec<Event>, CqrsError> {
-///         // Implement command handling logic
-///         unimplemented!()
-///     }
-/// }
-///
-/// // Create a Cqrs instance.
-/// let aggregate_manager = MyAggregateManager;
-/// let event_store = MyEventStore;
-/// let consumers = MyEventConsumers;
-/// let mut cqrs = Cqrs::new(aggregate_manager, event_store, consumers);
-///
-/// // Execute a command using the Cqrs instance.
-/// let aggregate_id = Uuid::new_v4();
-/// let command = MyCommand;
-/// match cqrs.execute(aggregate_id, &command).await {
-///     Ok(_aggregate_id) => println!("Command executed successfully!"),
-///     Err(err) => eprintln!("Error: {:?}", err),
-/// }
-/// ```
-pub struct Cqrs<ES, EC, AM>
+/// All methods take `&self`, so `Cqrs` can be wrapped in `Arc` for concurrent use.
+pub struct Cqrs<ES, AM>
 where
     AM: AggregateManager,
     ES: EventStore,
-    EC: EventConsumersGroup,
 {
-    /// The aggregate manager.
     aggregate_manager: AM,
-
-    /// The event store.
     event_store: ES,
-
-    /// The event consumers.
-    consumers: EC,
+    consumers: EventConsumers,
 }
 
-impl<ES, EC, AM> Cqrs<ES, EC, AM>
+impl<ES, AM> Cqrs<ES, AM>
 where
     AM: AggregateManager,
     ES: EventStore,
-    EC: EventConsumersGroup,
 {
     /// Creates a new Cqrs instance.
-    pub fn new(aggregate_manager: AM, event_store: ES, consumers: EC) -> Self {
+    pub fn new(aggregate_manager: AM, event_store: ES, consumers: EventConsumers) -> Self {
         Self {
             aggregate_manager,
             event_store,
@@ -90,7 +34,17 @@ where
     }
 
     /// Executes a command on an aggregate.
-    pub async fn execute<C>(&mut self, aggregate_id: Uuid, command: &C) -> Result<Uuid, CqrsError>
+    ///
+    /// The flow:
+    /// 1. Load aggregate from the aggregate manager
+    /// 2. Execute the command, getting domain events
+    /// 3. Wrap domain events into `Event` structs with version tracking
+    /// 4. Save events to the event store (with optimistic concurrency check)
+    /// 5. Apply events to the aggregate
+    /// 6. Process events through consumers
+    /// 7. Store the aggregate (e.g., snapshot)
+    /// 8. Return the aggregate ID
+    pub async fn execute<C>(&self, aggregate_id: Uuid, command: &C) -> Result<Uuid, CqrsError>
     where
         C: Command,
     {
@@ -99,10 +53,22 @@ where
             .load::<C::Aggregate>(aggregate_id)
             .await?;
 
-        let events = command.handle(&aggregate).await?;
+        let domain_events = command.handle(&aggregate).await?;
 
-        self.event_store.save_events(aggregate_id, &events).await?;
-        aggregate.apply_events(&events).await;
+        let current_version = aggregate.version();
+        let events: Vec<Event> = domain_events
+            .into_iter()
+            .enumerate()
+            .map(|(i, payload)| Event::new(aggregate_id, payload, current_version + i as u64 + 1))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.event_store
+            .save_events(aggregate_id, &events, current_version)
+            .await?;
+
+        aggregate.apply_events(&events).await?;
+        let new_version = events.last().map(|e| e.version).unwrap_or(current_version);
+        aggregate.set_version(new_version);
 
         for event in events.iter() {
             self.consumers.process(event).await;
@@ -116,11 +82,10 @@ where
     }
 }
 
-/// Defines `query` function to run `Query` from `Cqrs`.
-impl<ES, EC, AM> QueriesRunner for Cqrs<ES, EC, AM>
+/// Implements `QueryRunner` so you can call `cqrs.query(&q).await`.
+impl<ES, AM> QueryRunner for Cqrs<ES, AM>
 where
     AM: AggregateManager,
     ES: EventStore,
-    EC: EventConsumersGroup,
 {
 }

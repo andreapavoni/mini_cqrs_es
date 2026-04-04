@@ -2,46 +2,52 @@
 
 // Common code shared in the examples to avoid repetitions and focus on the core concepts
 
-use std::collections::HashMap;
-
-use async_trait::async_trait;
+use std::{collections::HashMap, sync::Mutex};
 
 use mini_cqrs_es::{CqrsError, Event, EventStore, Uuid};
 
 // Event Store
-#[derive(Clone)]
 pub struct InMemoryEventStore {
-    events: HashMap<Uuid, Vec<Event>>,
+    events: Mutex<HashMap<Uuid, Vec<Event>>>,
 }
 
 impl InMemoryEventStore {
     pub fn new() -> Self {
         InMemoryEventStore {
-            events: HashMap::new(),
+            events: Mutex::new(HashMap::new()),
         }
     }
 }
 
-#[async_trait]
 impl EventStore for InMemoryEventStore {
-    async fn save_events(&mut self, aggregate_id: Uuid, events: &[Event]) -> Result<(), CqrsError> {
-        if let Some(current_events) = self.events.get_mut(&aggregate_id) {
-            current_events.extend(events.to_vec());
-        } else {
-            self.events.insert(aggregate_id, events.into());
-        };
+    async fn save_events(
+        &self,
+        aggregate_id: Uuid,
+        events: &[Event],
+        expected_version: u64,
+    ) -> Result<(), CqrsError> {
+        let mut store = self.events.lock().unwrap();
+        let current = store.entry(aggregate_id).or_default();
+        let actual_version = current.last().map(|e| e.version).unwrap_or(0);
 
+        if actual_version != expected_version {
+            return Err(CqrsError::Conflict {
+                expected_version,
+                actual_version,
+            });
+        }
+
+        current.extend(events.to_vec());
         Ok(())
     }
 
-    async fn load_events(&self, aggregate_id: Uuid) -> Result<Vec<Event>, CqrsError> {
-        if let Some(events) = self.events.get(&aggregate_id) {
-            Ok(events.to_vec())
+    async fn load_events(&self, aggregate_id: Uuid) -> Result<(Vec<Event>, u64), CqrsError> {
+        let store = self.events.lock().unwrap();
+        if let Some(events) = store.get(&aggregate_id) {
+            let version = events.last().map(|e| e.version).unwrap_or(0);
+            Ok((events.to_vec(), version))
         } else {
-            Err(CqrsError::new(format!(
-                "No events for aggregate id `{}`",
-                aggregate_id
-            )))
+            Ok((vec![], 0))
         }
     }
 }
