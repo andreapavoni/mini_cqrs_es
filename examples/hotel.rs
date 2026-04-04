@@ -11,7 +11,7 @@
 ///
 use std::sync::{Arc, Mutex};
 
-use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SimpleAggregateManager, Uuid};
+use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SimpleCqrs, SimpleAggregateManager, Uuid};
 use sqlx::SqlitePool;
 
 #[path = "lib/common_hotel.rs"]
@@ -29,7 +29,7 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
     let consumers = EventConsumers::new().with(consumer);
 
     let agg_manager = SimpleAggregateManager::new(store.clone());
-    let cqrs = Cqrs::new(agg_manager, store, consumers);
+    let cqrs = SimpleCqrs::new(agg_manager, store, consumers);
     let hotel_id = Uuid::new_v4();
 
     // Initialize hotel with 5 rooms
@@ -78,7 +78,7 @@ mod tests {
     use mini_cqrs_es::{AggregateManager, CqrsError};
 
     async fn setup() -> (
-        Cqrs<SqliteEventStore, SimpleAggregateManager<SqliteEventStore>>,
+        SimpleCqrs<SqliteEventStore, SimpleAggregateManager<SqliteEventStore>>,
         Arc<Mutex<HotelReadModel>>,
         Uuid,
     ) {
@@ -91,7 +91,7 @@ mod tests {
         let consumers = EventConsumers::new().with(consumer);
 
         let agg_manager = SimpleAggregateManager::new(store.clone());
-        let cqrs = Cqrs::new(agg_manager, store, consumers);
+        let cqrs = SimpleCqrs::new(agg_manager, store, consumers);
         let hotel_id = Uuid::new_v4();
 
         (cqrs, read_model, hotel_id)
@@ -348,7 +348,7 @@ mod tests {
         let consumers = EventConsumers::new().with(consumer);
 
         let agg_manager = SimpleAggregateManager::new(store.clone());
-        let cqrs = Cqrs::new(agg_manager, store.clone(), consumers);
+        let cqrs = SimpleCqrs::new(agg_manager, store.clone(), consumers);
         let hotel_id = Uuid::new_v4();
 
         // Run operations

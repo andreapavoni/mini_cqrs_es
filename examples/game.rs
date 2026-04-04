@@ -8,7 +8,7 @@
 ///
 use std::sync::{Arc, Mutex};
 
-use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SnapshotAggregateManager, Uuid};
+use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SimpleCqrs, SnapshotAggregateManager, Uuid};
 
 #[path = "lib/common_game.rs"]
 mod common_game;
@@ -26,7 +26,7 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
 
     let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
 
-    let cqrs = Cqrs::new(aggregate_manager, store, consumers);
+    let cqrs = SimpleCqrs::new(aggregate_manager, store, consumers);
 
     let player_1 = Player {
         id: "player_1".to_string(),

@@ -60,7 +60,7 @@ Once you have added the library to your project's dependencies, import it:
 ```rust
 use mini_cqrs_es::*;
 // or selectively:
-// use mini_cqrs_es::{Aggregate, Command, Cqrs, EventConsumers, ...};
+// use mini_cqrs_es::{Aggregate, Command, SimpleCqrs, EventConsumers, ...};
 ```
 
 Being made almost entirely of traits, MiniCQRS/ES is flexible but requires some boilerplate.
@@ -84,9 +84,9 @@ let consumers = EventConsumers::new()
     .with(GameMainConsumer::new(repo.clone()))
     .with(PrintEventConsumer {});
 
-// Cqrs is provided by MiniCQRS/ES and wires everything together
+// SimpleCqrs is provided by MiniCQRS/ES and wires everything together
 // Note: takes &self — safe to share across async tasks via Arc
-let cqrs = Cqrs::new(aggregate_manager, event_store, consumers);
+let cqrs = SimpleCqrs::new(aggregate_manager, event_store, consumers);
 
 // Build a command and execute it
 let aggregate_id = Uuid::new_v4();
@@ -124,7 +124,7 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
 }
 ```
 
-Please note that, except for `Cqrs`, `SimpleAggregateManager`, and `SnapshotAggregateManager` (there's `AggregateManager` trait, btw), everything else is an implementation of some trait. The `InMemory*` types in the [game example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/game.rs) simulate storage. In real use cases you will build wrappers around your database client or other storage solution — see the [hotel example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/hotel.rs) for a complete SQLite implementation using `sqlx`.
+Please note that, even if there are some ready to use structs (like `SimpleCqrs`, `SimpleAggregateManager`, and `SnapshotAggregateManager`), everything is an implementation of some trait. The `InMemory*` types in the [game example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/game.rs) simulate storage. In real use cases you will build wrappers around your database client or other storage solution — see the [hotel example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/hotel.rs) for a complete SQLite implementation using `sqlx`.
 
 ## Documentation
 

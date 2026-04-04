@@ -37,7 +37,7 @@ mod consumer;
 pub use consumer::{EventConsumer, EventConsumers};
 
 mod cqrs;
-pub use cqrs::Cqrs;
+pub use cqrs::{Cqrs, SimpleCqrs};
 
 mod query;
 pub use query::{Query, QueryRunner};
