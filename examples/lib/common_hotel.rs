@@ -3,13 +3,14 @@
 use std::{
     collections::HashMap,
     fmt,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use serde::{Deserialize, Serialize};
 
 use mini_cqrs_es::{
-    Aggregate, Command, CqrsError, Event, EventConsumer, EventPayload, Query, Uuid,
+    Aggregate, Command, CqrsError, EventConsumer, EventPayload, Query, StoredEvent,
 };
 
 #[path = "sqlite_store.rs"]
@@ -17,6 +18,28 @@ mod sqlite_store;
 pub use sqlite_store::*;
 
 // --- Room State ---
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HotelId(u32);
+
+impl HotelId {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for HotelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for HotelId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RoomState {
@@ -49,7 +72,7 @@ impl EventPayload for HotelEvent {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HotelAggregate {
-    id: Uuid,
+    id: HotelId,
     version: u64,
     pub rooms: HashMap<u32, RoomState>,
 }
@@ -57,7 +80,7 @@ pub struct HotelAggregate {
 impl Default for HotelAggregate {
     fn default() -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: HotelId::new(0),
             version: 0,
             rooms: HashMap::new(),
         }
@@ -65,6 +88,7 @@ impl Default for HotelAggregate {
 }
 
 impl Aggregate for HotelAggregate {
+    type Id = HotelId;
     type Event = HotelEvent;
 
     async fn apply(&mut self, event: &Self::Event) {
@@ -92,11 +116,11 @@ impl Aggregate for HotelAggregate {
         }
     }
 
-    fn aggregate_id(&self) -> Uuid {
-        self.id
+    fn aggregate_id(&self) -> Self::Id {
+        self.id.clone()
     }
 
-    fn set_aggregate_id(&mut self, id: Uuid) {
+    fn set_aggregate_id(&mut self, id: Self::Id) {
         self.id = id;
     }
 
@@ -199,10 +223,8 @@ impl HotelProjectionConsumer {
 }
 
 impl EventConsumer for HotelProjectionConsumer {
-    async fn process(&self, evt: &Event) {
-        let Ok(event) = evt.get_payload::<HotelEvent>() else {
-            return;
-        };
+    async fn process(&self, evt: &StoredEvent) -> Result<(), CqrsError> {
+        let event = evt.get_payload::<HotelEvent>()?;
 
         let mut model = self.read_model.lock().unwrap();
         match event {
@@ -224,6 +246,7 @@ impl EventConsumer for HotelProjectionConsumer {
                 model.rooms.insert(room_number, RoomState::Free);
             }
         }
+        Ok(())
     }
 }
 

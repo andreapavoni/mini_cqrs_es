@@ -1,29 +1,29 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::Event;
+use crate::{CqrsError, StoredEvent};
 
 /// The `EventConsumer` trait defines the behavior of an event consumer, which is responsible
 /// for processing events (e.g., updating read models, sending notifications).
 ///
 /// Methods take `&self` to allow concurrent access.
 pub trait EventConsumer: Send + Sync {
-    fn process(&self, event: &Event) -> impl Future<Output = ()> + Send;
+    fn process(&self, event: &StoredEvent) -> impl Future<Output = Result<(), CqrsError>> + Send;
 }
 
 // Internal dyn-compatible wrapper so we can store consumers in a Vec<Box<dyn ...>>.
 trait DynEventConsumer: Send + Sync {
     fn process_dyn<'a>(
         &'a self,
-        event: &'a Event,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+        event: &'a StoredEvent,
+    ) -> Pin<Box<dyn Future<Output = Result<(), CqrsError>> + Send + 'a>>;
 }
 
 impl<T: EventConsumer> DynEventConsumer for T {
     fn process_dyn<'a>(
         &'a self,
-        event: &'a Event,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        event: &'a StoredEvent,
+    ) -> Pin<Box<dyn Future<Output = Result<(), CqrsError>> + Send + 'a>> {
         Box::pin(EventConsumer::process(self, event))
     }
 }
@@ -55,10 +55,11 @@ impl EventConsumers {
     }
 
     /// Processes an event through all consumers sequentially.
-    pub async fn process(&self, event: &Event) {
+    pub async fn process(&self, event: &StoredEvent) -> Result<(), CqrsError> {
         for consumer in &self.consumers {
-            consumer.process_dyn(event).await;
+            consumer.process_dyn(event).await?;
         }
+        Ok(())
     }
 }
 

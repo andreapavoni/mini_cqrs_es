@@ -21,13 +21,13 @@ This lightweight library offers the necessary components abstractions and minima
 
 - **Aggregates:** Define your domain entities as aggregates, handle state changes, and apply events with straightforward traits.
 
-- **Commands:** Implement custom commands that return domain events directly. The framework wraps them and handles versioning.
+- **Commands:** Implement custom commands that return domain events directly. The framework persists them as event envelopes with versioning and metadata.
 
-- **Event Store:** Store and retrieve events efficiently with optimistic concurrency built in. Implement the trait against any storage backend (SQLite, Postgres, Redis, etc.).
+- **Event Store:** Store and retrieve persisted envelopes (`StoredEvent`) with optimistic concurrency built in. Implement the trait against any storage backend (SQLite, Postgres, Redis, etc.).
 
 - **Snapshot Store:** Optionally use snapshots to speed up aggregate state recovery from long event streams.
 
-- **Event Consumers:** Process events through a composable consumer pipeline built with a simple builder pattern.
+- **Event Consumers:** Process persisted events through a composable consumer pipeline; consumers are fallible and can abort command execution.
 
 - **Queries:** Implement custom queries to retrieve data from your read models.
 
@@ -89,16 +89,16 @@ let consumers = EventConsumers::new()
 let cqrs = SimpleCqrs::new(aggregate_manager, event_store, consumers);
 
 // Build a command and execute it
-let aggregate_id = Uuid::new_v4();
+let aggregate_id = GameId::new(uuid::Uuid::new_v4().to_string());
 let cmd = CmdStartGame { player_1, player_2, goal: 3 };
-cqrs.execute(aggregate_id, &cmd).await?;
+cqrs.execute(&aggregate_id, &cmd).await?;
 
 // Query the read model
-let query = GetGameQuery::new(aggregate_id, repo.clone());
+let query = GetGameQuery::new(aggregate_id.clone(), repo.clone());
 let result = cqrs.query(&query).await?.unwrap();
 ```
 
-Commands return domain-specific event types directly — the framework handles wrapping them into `Event` structs with versioning:
+Commands return domain-specific event types directly. The framework converts them to `NewEvent`, persists them, and then processes returned `StoredEvent` envelopes:
 
 ```rust
 impl Command for CmdStartGame {
@@ -114,7 +114,41 @@ impl Command for CmdStartGame {
 }
 ```
 
-Event payloads no longer need to carry an `aggregate_id` field — the framework injects it automatically.
+Event payloads remain pure domain events; aggregate identity and infrastructure metadata live in `StoredEvent`.
+
+Aggregate IDs are typed at the domain boundary:
+
+```rust
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GameId(String);
+
+impl std::fmt::Display for GameId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for GameId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
+impl Aggregate for GameAggregate {
+    type Id = GameId;
+    type Event = GameEvent;
+    // ...
+}
+```
+
+Different aggregates can use different ID shapes. In the examples:
+
+- `GameAggregate` uses `GameId(String)` (UUID-like string identity).
+- `HotelAggregate` uses `HotelId(u32)` (numeric identity).
+
+You can attach metadata (`command_id`, `correlation_id`, `causation_id`, `actor`, `tenant_id`, custom `extra`) via `EventMetadata` on persisted events.
 
 For application-level error handling, `anyhow` is re-exported:
 

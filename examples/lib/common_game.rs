@@ -5,26 +5,50 @@
 use std::{
     collections::HashMap,
     fmt,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use serde::{Deserialize, Serialize};
 
 use mini_cqrs_es::{
-    Aggregate, AggregateSnapshot, Command, CqrsError, Event, EventConsumer, EventPayload, Query,
-    Repository, SnapshotStore, Uuid,
+    Aggregate, AggregateSnapshot, Command, CqrsError, EventConsumer, EventPayload, Query,
+    Repository, SnapshotStore, StoredEvent,
 };
 
 #[path = "common.rs"]
 mod common;
 pub use common::*;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GameId(String);
+
+impl GameId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Display for GameId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for GameId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_string()))
+    }
+}
+
 // Snapshot Store
 pub struct InMemorySnapshotStore<T>
 where
     T: Aggregate,
 {
-    snapshots: Mutex<HashMap<Uuid, AggregateSnapshot<T>>>,
+    snapshots: Mutex<HashMap<String, AggregateSnapshot<T>>>,
 }
 
 impl<T> InMemorySnapshotStore<T>
@@ -48,18 +72,22 @@ where
     {
         let aggregate = snapshot.get_payload::<A>()?;
         let snapshot = AggregateSnapshot::new(&aggregate, Some(snapshot.version))?;
+        let aggregate_id = snapshot.aggregate_id.to_string();
 
         let mut store = self.snapshots.lock().unwrap();
-        store.insert(snapshot.aggregate_id, snapshot);
+        store.insert(aggregate_id, snapshot);
         Ok(())
     }
 
-    async fn load_snapshot<T>(&self, aggregate_id: Uuid) -> Result<AggregateSnapshot<T>, CqrsError>
+    async fn load_snapshot<T>(
+        &self,
+        aggregate_id: &T::Id,
+    ) -> Result<AggregateSnapshot<T>, CqrsError>
     where
         T: Aggregate,
     {
         let store = self.snapshots.lock().unwrap();
-        if let Some(snapshot) = store.get(&aggregate_id) {
+        if let Some(snapshot) = store.get(&aggregate_id.to_string()) {
             let aggregate = snapshot.get_payload::<T>()?;
             Ok(AggregateSnapshot::new(&aggregate, Some(snapshot.version))?)
         } else {
@@ -174,7 +202,7 @@ pub enum GameStatus {
 // Game aggregate
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameAggregate {
-    id: Uuid,
+    id: GameId,
     version: u64,
     player_1: Player,
     player_2: Player,
@@ -185,7 +213,7 @@ pub struct GameAggregate {
 impl Default for GameAggregate {
     fn default() -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: GameId::new(uuid::Uuid::new_v4().to_string()),
             version: 0,
             player_1: Player {
                 id: "player_1".to_string(),
@@ -202,6 +230,7 @@ impl Default for GameAggregate {
 }
 
 impl Aggregate for GameAggregate {
+    type Id = GameId;
     type Event = GameEvent;
 
     async fn apply(&mut self, event: &Self::Event) {
@@ -231,11 +260,11 @@ impl Aggregate for GameAggregate {
         };
     }
 
-    fn aggregate_id(&self) -> Uuid {
-        self.id
+    fn aggregate_id(&self) -> Self::Id {
+        self.id.clone()
     }
 
-    fn set_aggregate_id(&mut self, id: Uuid) {
+    fn set_aggregate_id(&mut self, id: Self::Id) {
         self.id = id;
     }
 
@@ -253,7 +282,7 @@ impl Aggregate for GameAggregate {
 
 #[derive(Default, Clone, Debug)]
 pub struct InMemoryRepository {
-    games: HashMap<Uuid, GameModel>,
+    games: HashMap<GameId, GameModel>,
 }
 
 impl InMemoryRepository {
@@ -263,11 +292,11 @@ impl InMemoryRepository {
         }
     }
 
-    pub fn get_game(&self, id: Uuid) -> Option<GameModel> {
-        self.games.get(&id).cloned()
+    pub fn get_game(&self, id: &GameId) -> Option<GameModel> {
+        self.games.get(id).cloned()
     }
 
-    pub fn update_game(&mut self, id: Uuid, read_model: GameModel) {
+    pub fn update_game(&mut self, id: GameId, read_model: GameModel) {
         self.games.insert(id, read_model);
     }
 }
@@ -276,12 +305,12 @@ impl Repository for InMemoryRepository {}
 
 #[derive(Clone)]
 pub struct GetGameQuery {
-    aggregate_id: Uuid,
+    aggregate_id: GameId,
     repo: Arc<Mutex<InMemoryRepository>>,
 }
 
 impl GetGameQuery {
-    pub fn new(aggregate_id: Uuid, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
+    pub fn new(aggregate_id: GameId, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
         Self { aggregate_id, repo }
     }
 }
@@ -291,7 +320,7 @@ impl Query for GetGameQuery {
 
     async fn apply(&self) -> Self::Output {
         let repo = self.repo.lock().unwrap();
-        Ok(repo.get_game(self.aggregate_id))
+        Ok(repo.get_game(&self.aggregate_id))
     }
 }
 
@@ -299,7 +328,7 @@ impl Query for GetGameQuery {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameModel {
-    pub id: Uuid,
+    pub id: GameId,
     pub goal: u32,
     pub player_1: Player,
     pub player_2: Player,
@@ -321,10 +350,8 @@ impl GameMainConsumer {
 }
 
 impl EventConsumer for GameMainConsumer {
-    async fn process(&self, evt: &Event) {
-        let Ok(event) = evt.get_payload::<GameEvent>() else {
-            return;
-        };
+    async fn process(&self, evt: &StoredEvent) -> Result<(), CqrsError> {
+        let event = evt.get_payload::<GameEvent>()?;
 
         match event {
             GameEvent::GameStarted {
@@ -333,33 +360,37 @@ impl EventConsumer for GameMainConsumer {
                 goal,
             } => {
                 let model = GameModel {
-                    id: evt.aggregate_id,
+                    id: GameId::new(evt.aggregate_id.clone()),
                     player_1: player_1.clone(),
                     player_2: player_2.clone(),
                     goal,
                     status: GameStatus::Playing,
                 };
-                self.repo.lock().unwrap().update_game(evt.aggregate_id, model);
+                self.repo
+                    .lock()
+                    .unwrap()
+                    .update_game(GameId::new(evt.aggregate_id.clone()), model);
             }
             GameEvent::PlayerAttacked { attacker } => {
                 let mut repo = self.repo.lock().unwrap();
-                if let Some(mut model) = repo.get_game(evt.aggregate_id) {
+                if let Some(mut model) = repo.get_game(&GameId::new(evt.aggregate_id.clone())) {
                     if model.player_1.id == attacker.id {
                         model.player_1.points += 1;
                     } else {
                         model.player_2.points += 1;
                     }
-                    repo.update_game(evt.aggregate_id, model);
+                    repo.update_game(GameId::new(evt.aggregate_id.clone()), model);
                 }
             }
             GameEvent::GameEndedWithWinner { winner } => {
                 let mut repo = self.repo.lock().unwrap();
-                if let Some(mut model) = repo.get_game(evt.aggregate_id) {
+                if let Some(mut model) = repo.get_game(&GameId::new(evt.aggregate_id.clone())) {
                     model.status = GameStatus::Winner(winner.clone());
-                    repo.update_game(evt.aggregate_id, model);
+                    repo.update_game(GameId::new(evt.aggregate_id.clone()), model);
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -367,10 +398,8 @@ impl EventConsumer for GameMainConsumer {
 pub struct PrintEventConsumer {}
 
 impl EventConsumer for PrintEventConsumer {
-    async fn process(&self, event: &Event) {
-        let Ok(payload) = event.get_payload::<GameEvent>() else {
-            return;
-        };
+    async fn process(&self, event: &StoredEvent) -> Result<(), CqrsError> {
+        let payload = event.get_payload::<GameEvent>()?;
 
         match payload {
             GameEvent::GameStarted {
@@ -390,6 +419,7 @@ impl EventConsumer for PrintEventConsumer {
                 println!("LOG: Game ended with winner: {}", winner.id)
             }
         }
+        Ok(())
     }
 }
 
@@ -404,4 +434,18 @@ pub fn verify_game_result(
     assert_eq!(game.player_2.points, player_2_points);
     assert_eq!(game.goal, goal);
     assert_eq!(game.status, status);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GameId;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_game_id_display_fromstr_roundtrip() {
+        let id = GameId::new("game-123");
+        let rendered = id.to_string();
+        let parsed = GameId::from_str(&rendered).unwrap();
+        assert_eq!(parsed, id);
+    }
 }

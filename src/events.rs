@@ -1,55 +1,63 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
 
 use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{CqrsError, Uuid};
+use crate::CqrsError;
 
-/// The `Event` struct represents a change to the state of an aggregate in a CQRS application.
-///
-/// An event contains information such as its unique ID, event type, aggregate ID, payload data,
-/// version, and timestamp. Events are created by the framework when a command is executed,
-/// wrapping domain event payloads.
-#[derive(Clone, Debug)]
-pub struct Event {
-    /// The ID of the event.
-    pub id: String,
+/// Optional metadata associated with an event.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EventMetadata {
+    pub command_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub causation_id: Option<String>,
+    pub actor: Option<String>,
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
 
-    /// The type of event.
+/// A new event to be persisted by the event store.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewEvent {
     pub event_type: String,
-
-    /// The ID of the aggregate that the event is associated with.
-    pub aggregate_id: Uuid,
-
-    /// The payload of the event.
-    payload: serde_json::Value,
-
-    /// The version of the event.
-    pub version: u64,
-
-    /// The timestamp of the event.
+    pub payload: serde_json::Value,
+    #[serde(default)]
+    pub metadata: EventMetadata,
     pub timestamp: DateTime<Utc>,
 }
 
-impl Event {
-    /// Creates a new event from an event payload and aggregate ID.
-    pub fn new<T: EventPayload>(
-        aggregate_id: Uuid,
+impl NewEvent {
+    pub fn from_payload<T: EventPayload>(
         payload: T,
-        version: u64,
+        metadata: EventMetadata,
     ) -> Result<Self, CqrsError> {
         Ok(Self {
-            id: Uuid::new_v4().to_string(),
             event_type: payload.name(),
-            aggregate_id,
             payload: serde_json::to_value(payload)?,
-            version,
+            metadata,
             timestamp: Utc::now(),
         })
     }
+}
 
-    /// Gets the payload of the event.
+/// A persisted event envelope.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StoredEvent {
+    pub id: String,
+    pub aggregate_id: String,
+    pub aggregate_type: String,
+    pub version: u64,
+    pub event_type: String,
+    pub payload: serde_json::Value,
+    pub metadata: EventMetadata,
+    pub global_sequence: Option<i64>,
+    pub timestamp: DateTime<Utc>,
+}
+
+impl StoredEvent {
     pub fn get_payload<T: EventPayload>(&self) -> Result<T, CqrsError> {
         Ok(serde_json::from_value(self.payload.clone())?)
     }
@@ -79,14 +87,16 @@ pub trait EventStore: Send + Sync {
     /// Saves events to the event store. `expected_version` is the last known version of the aggregate.
     fn save_events(
         &self,
-        aggregate_id: Uuid,
-        events: &[Event],
+        aggregate_type: &str,
+        aggregate_id: &str,
+        events: &[NewEvent],
         expected_version: u64,
-    ) -> impl Future<Output = Result<(), CqrsError>> + Send;
+    ) -> impl Future<Output = Result<Vec<StoredEvent>, CqrsError>> + Send;
 
     /// Loads events from the event store. Returns the events and the current version.
     fn load_events(
         &self,
-        aggregate_id: Uuid,
-    ) -> impl Future<Output = Result<(Vec<Event>, u64), CqrsError>> + Send;
+        aggregate_type: &str,
+        aggregate_id: &str,
+    ) -> impl Future<Output = Result<(Vec<StoredEvent>, u64), CqrsError>> + Send;
 }

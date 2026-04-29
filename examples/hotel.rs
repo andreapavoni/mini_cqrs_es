@@ -11,7 +11,7 @@
 ///
 use std::sync::{Arc, Mutex};
 
-use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SimpleCqrs, SimpleAggregateManager, Uuid};
+use mini_cqrs_es::{Cqrs, EventConsumers, QueryRunner, SimpleCqrs, SimpleAggregateManager};
 use sqlx::SqlitePool;
 
 #[path = "lib/common_hotel.rs"]
@@ -30,16 +30,16 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
 
     let agg_manager = SimpleAggregateManager::new(store.clone());
     let cqrs = SimpleCqrs::new(agg_manager, store, consumers);
-    let hotel_id = Uuid::new_v4();
+    let hotel_id = HotelId::new(1);
 
     // Initialize hotel with 5 rooms
-    cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+    cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
         .await?;
     println!("Hotel initialized with 5 rooms.");
 
     // Check in some guests
     cqrs.execute(
-        hotel_id,
+        &hotel_id,
         &CmdCheckIn {
             room_number: 1,
             guest_name: "Alice".into(),
@@ -47,7 +47,7 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
     )
     .await?;
     cqrs.execute(
-        hotel_id,
+        &hotel_id,
         &CmdCheckIn {
             room_number: 3,
             guest_name: "Bob".into(),
@@ -61,7 +61,7 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
     println!("After check-ins: {:?}", state.rooms);
 
     // Check out Alice
-    cqrs.execute(hotel_id, &CmdCheckOut { room_number: 1 })
+    cqrs.execute(&hotel_id, &CmdCheckOut { room_number: 1 })
         .await?;
 
     let state = cqrs
@@ -75,12 +75,13 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mini_cqrs_es::{AggregateManager, CqrsError};
+    use mini_cqrs_es::{AggregateManager, CqrsError, EventConsumer, StoredEvent};
+    use std::str::FromStr;
 
     async fn setup() -> (
         SimpleCqrs<SqliteEventStore, SimpleAggregateManager<SqliteEventStore>>,
         Arc<Mutex<HotelReadModel>>,
-        Uuid,
+        HotelId,
     ) {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let store = SqliteEventStore::new(pool);
@@ -92,7 +93,7 @@ mod tests {
 
         let agg_manager = SimpleAggregateManager::new(store.clone());
         let cqrs = SimpleCqrs::new(agg_manager, store, consumers);
-        let hotel_id = Uuid::new_v4();
+        let hotel_id = HotelId::new(1);
 
         (cqrs, read_model, hotel_id)
     }
@@ -101,7 +102,7 @@ mod tests {
     async fn test_initialize_hotel() {
         let (cqrs, read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
 
@@ -118,11 +119,11 @@ mod tests {
     async fn test_check_in_guest() {
         let (cqrs, read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 1,
                 guest_name: "Alice".into(),
@@ -149,11 +150,11 @@ mod tests {
     async fn test_check_in_occupied_room_fails() {
         let (cqrs, _read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 1,
                 guest_name: "Alice".into(),
@@ -164,7 +165,7 @@ mod tests {
 
         let result = cqrs
             .execute(
-                hotel_id,
+                &hotel_id,
                 &CmdCheckIn {
                     room_number: 1,
                     guest_name: "Bob".into(),
@@ -179,11 +180,11 @@ mod tests {
     async fn test_check_out_guest() {
         let (cqrs, read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 1,
                 guest_name: "Alice".into(),
@@ -191,7 +192,7 @@ mod tests {
         )
         .await
         .unwrap();
-        cqrs.execute(hotel_id, &CmdCheckOut { room_number: 1 })
+        cqrs.execute(&hotel_id, &CmdCheckOut { room_number: 1 })
             .await
             .unwrap();
 
@@ -205,12 +206,12 @@ mod tests {
     async fn test_check_out_free_room_fails() {
         let (cqrs, _read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
 
         let result = cqrs
-            .execute(hotel_id, &CmdCheckOut { room_number: 1 })
+            .execute(&hotel_id, &CmdCheckOut { room_number: 1 })
             .await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), CqrsError::Domain(_)));
@@ -220,11 +221,11 @@ mod tests {
     async fn test_multiple_rooms() {
         let (cqrs, read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 1,
                 guest_name: "Alice".into(),
@@ -233,7 +234,7 @@ mod tests {
         .await
         .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 2,
                 guest_name: "Bob".into(),
@@ -242,7 +243,7 @@ mod tests {
         .await
         .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 3,
                 guest_name: "Charlie".into(),
@@ -272,7 +273,7 @@ mod tests {
     async fn test_full_lifecycle() {
         let (cqrs, read_model, hotel_id) = setup().await;
 
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
 
@@ -285,7 +286,7 @@ mod tests {
             (5, "Eve"),
         ] {
             cqrs.execute(
-                hotel_id,
+                &hotel_id,
                 &CmdCheckIn {
                     room_number: i,
                     guest_name: name.into(),
@@ -305,10 +306,10 @@ mod tests {
             .all(|s| matches!(s, RoomState::Occupied { .. })));
 
         // Check out rooms 2 and 4
-        cqrs.execute(hotel_id, &CmdCheckOut { room_number: 2 })
+        cqrs.execute(&hotel_id, &CmdCheckOut { room_number: 2 })
             .await
             .unwrap();
-        cqrs.execute(hotel_id, &CmdCheckOut { room_number: 4 })
+        cqrs.execute(&hotel_id, &CmdCheckOut { room_number: 4 })
             .await
             .unwrap();
 
@@ -349,14 +350,14 @@ mod tests {
 
         let agg_manager = SimpleAggregateManager::new(store.clone());
         let cqrs = SimpleCqrs::new(agg_manager, store.clone(), consumers);
-        let hotel_id = Uuid::new_v4();
+        let hotel_id = HotelId::new(1);
 
         // Run operations
-        cqrs.execute(hotel_id, &CmdInitializeHotel { room_count: 5 })
+        cqrs.execute(&hotel_id, &CmdInitializeHotel { room_count: 5 })
             .await
             .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 1,
                 guest_name: "Alice".into(),
@@ -365,7 +366,7 @@ mod tests {
         .await
         .unwrap();
         cqrs.execute(
-            hotel_id,
+            &hotel_id,
             &CmdCheckIn {
                 room_number: 3,
                 guest_name: "Charlie".into(),
@@ -373,7 +374,7 @@ mod tests {
         )
         .await
         .unwrap();
-        cqrs.execute(hotel_id, &CmdCheckOut { room_number: 1 })
+        cqrs.execute(&hotel_id, &CmdCheckOut { room_number: 1 })
             .await
             .unwrap();
 
@@ -384,12 +385,48 @@ mod tests {
 
         // Replay from event store using a fresh aggregate manager
         let fresh_manager = SimpleAggregateManager::new(store);
-        let replayed: HotelAggregate = fresh_manager.load(hotel_id).await.unwrap();
+        let replayed: HotelAggregate = fresh_manager.load(&hotel_id).await.unwrap();
 
         // Verify replayed aggregate matches projected read model
         assert_eq!(replayed.rooms.len(), projected_state.rooms.len());
         for (room_number, room_state) in &projected_state.rooms {
             assert_eq!(replayed.rooms.get(room_number), Some(room_state));
         }
+    }
+
+    #[test]
+    fn test_hotel_id_display_fromstr_roundtrip() {
+        let id = HotelId::new(42);
+        let rendered = id.to_string();
+        let parsed = HotelId::from_str(&rendered).unwrap();
+        assert_eq!(parsed, id);
+    }
+
+    #[derive(Clone)]
+    struct FailingConsumer;
+
+    impl EventConsumer for FailingConsumer {
+        async fn process(&self, _event: &StoredEvent) -> Result<(), CqrsError> {
+            Err(CqrsError::Domain("projection failure".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_consumer_failure_aborts_execute() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let store = SqliteEventStore::new(pool);
+        store.create_table().await.unwrap();
+
+        let consumers = EventConsumers::new().with(FailingConsumer);
+        let agg_manager = SimpleAggregateManager::new(store.clone());
+        let cqrs = SimpleCqrs::new(agg_manager, store, consumers);
+        let hotel_id = HotelId::new(7);
+
+        let result = cqrs
+            .execute(&hotel_id, &CmdInitializeHotel { room_count: 3 })
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), CqrsError::Domain(_)));
     }
 }

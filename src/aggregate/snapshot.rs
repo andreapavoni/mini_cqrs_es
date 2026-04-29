@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use crate::{Aggregate, CqrsError, Uuid};
+use crate::{Aggregate, CqrsError};
 
 /// The `SnapshotStore` trait defines the behavior for storing and loading aggregate snapshots.
 ///
@@ -17,7 +17,7 @@ pub trait SnapshotStore: Send + Sync {
     /// Loads an aggregate snapshot from the snapshot store.
     fn load_snapshot<T>(
         &self,
-        aggregate_id: Uuid,
+        aggregate_id: &T::Id,
     ) -> impl Future<Output = Result<AggregateSnapshot<T>, CqrsError>> + Send
     where
         T: Aggregate;
@@ -30,7 +30,7 @@ where
     T: Aggregate,
 {
     /// The ID of the aggregate.
-    pub aggregate_id: Uuid,
+    pub aggregate_id: T::Id,
 
     /// The serialized payload of the aggregate.
     payload: serde_json::Value,

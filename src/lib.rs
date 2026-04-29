@@ -15,13 +15,12 @@
 //! For more detailed documentation, refer to the specific modules and types provided by MiniCQRS/ES.
 
 pub use ::anyhow;
-pub use uuid::Uuid;
 
 mod error;
 pub use error::CqrsError;
 
 mod events;
-pub use events::{Event, EventPayload, EventStore};
+pub use events::{EventMetadata, EventPayload, EventStore, NewEvent, StoredEvent};
 
 mod aggregate;
 pub use aggregate::{

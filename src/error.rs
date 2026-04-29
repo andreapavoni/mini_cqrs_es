@@ -1,11 +1,9 @@
-use crate::Uuid;
-
 /// An error that can occur in a CQRS application.
 #[derive(Debug, thiserror::Error)]
 pub enum CqrsError {
     /// The aggregate was not found.
     #[error("aggregate not found: {0}")]
-    AggregateNotFound(Uuid),
+    AggregateNotFound(String),
 
     /// An error occurred in the event store.
     #[error("event store error: {0}")]

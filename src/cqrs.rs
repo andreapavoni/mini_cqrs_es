@@ -1,8 +1,8 @@
 use std::future::Future;
 
 use crate::{
-    query::QueryRunner, Aggregate, AggregateManager, Command, CqrsError, Event, EventConsumers,
-    EventStore, Uuid,
+    query::QueryRunner, Aggregate, AggregateManager, Command, CqrsError, EventConsumers,
+    EventMetadata, EventStore, NewEvent,
 };
 
 /// The `Cqrs` trait represents the main entry point of a CQRS application.
@@ -15,9 +15,9 @@ pub trait Cqrs: QueryRunner + Send + Sync {
     /// Executes a command on an aggregate identified by `aggregate_id`.
     fn execute<C>(
         &self,
-        aggregate_id: Uuid,
+        aggregate_id: &<C::Aggregate as Aggregate>::Id,
         command: &C,
-    ) -> impl Future<Output = Result<Uuid, CqrsError>> + Send
+    ) -> impl Future<Output = Result<<C::Aggregate as Aggregate>::Id, CqrsError>> + Send
     where
         C: Command;
 }
@@ -66,7 +66,11 @@ where
     AM: AggregateManager,
     ES: EventStore,
 {
-    async fn execute<C>(&self, aggregate_id: Uuid, command: &C) -> Result<Uuid, CqrsError>
+    async fn execute<C>(
+        &self,
+        aggregate_id: &<C::Aggregate as Aggregate>::Id,
+        command: &C,
+    ) -> Result<<C::Aggregate as Aggregate>::Id, CqrsError>
     where
         C: Command,
     {
@@ -78,14 +82,19 @@ where
         let domain_events = command.handle(&aggregate).await?;
 
         let current_version = aggregate.version();
-        let events: Vec<Event> = domain_events
+        let new_events: Vec<NewEvent> = domain_events
             .into_iter()
-            .enumerate()
-            .map(|(i, payload)| Event::new(aggregate_id, payload, current_version + i as u64 + 1))
+            .map(|payload| NewEvent::from_payload(payload, EventMetadata::default()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.event_store
-            .save_events(aggregate_id, &events, current_version)
+        let events = self
+            .event_store
+            .save_events(
+                std::any::type_name::<C::Aggregate>(),
+                &aggregate_id.to_string(),
+                &new_events,
+                current_version,
+            )
             .await?;
 
         aggregate.apply_events(&events).await?;
@@ -93,14 +102,14 @@ where
         aggregate.set_version(new_version);
 
         for event in events.iter() {
-            self.consumers.process(event).await;
+            self.consumers.process(event).await?;
         }
 
         self.aggregate_manager
             .store::<C::Aggregate>(&aggregate)
             .await?;
 
-        Ok(aggregate_id)
+        Ok(aggregate_id.clone())
     }
 }
 

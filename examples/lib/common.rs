@@ -4,11 +4,11 @@
 
 use std::{collections::HashMap, sync::Mutex};
 
-use mini_cqrs_es::{CqrsError, Event, EventStore, Uuid};
+use mini_cqrs_es::{CqrsError, EventStore, NewEvent, StoredEvent};
 
 // Event Store
 pub struct InMemoryEventStore {
-    events: Mutex<HashMap<Uuid, Vec<Event>>>,
+    events: Mutex<HashMap<String, Vec<StoredEvent>>>,
 }
 
 impl InMemoryEventStore {
@@ -22,12 +22,13 @@ impl InMemoryEventStore {
 impl EventStore for InMemoryEventStore {
     async fn save_events(
         &self,
-        aggregate_id: Uuid,
-        events: &[Event],
+        aggregate_type: &str,
+        aggregate_id: &str,
+        events: &[NewEvent],
         expected_version: u64,
-    ) -> Result<(), CqrsError> {
+    ) -> Result<Vec<StoredEvent>, CqrsError> {
         let mut store = self.events.lock().unwrap();
-        let current = store.entry(aggregate_id).or_default();
+        let current = store.entry(aggregate_id.to_string()).or_default();
         let actual_version = current.last().map(|e| e.version).unwrap_or(0);
 
         if actual_version != expected_version {
@@ -37,13 +38,37 @@ impl EventStore for InMemoryEventStore {
             });
         }
 
-        current.extend(events.to_vec());
-        Ok(())
+        let mut persisted = Vec::with_capacity(events.len());
+        for (i, event) in events.iter().enumerate() {
+            let stored = StoredEvent {
+                id: format!("{aggregate_id}-{}", actual_version + i as u64 + 1),
+                aggregate_id: aggregate_id.to_string(),
+                aggregate_type: aggregate_type.to_string(),
+                version: actual_version + i as u64 + 1,
+                event_type: event.event_type.clone(),
+                payload: event.payload.clone(),
+                metadata: event.metadata.clone(),
+                global_sequence: None,
+                timestamp: event.timestamp,
+            };
+            persisted.push(stored);
+        }
+
+        if persisted.is_empty() {
+            return Ok(vec![]);
+        }
+
+        current.extend(persisted.clone());
+        Ok(persisted)
     }
 
-    async fn load_events(&self, aggregate_id: Uuid) -> Result<(Vec<Event>, u64), CqrsError> {
+    async fn load_events(
+        &self,
+        _aggregate_type: &str,
+        aggregate_id: &str,
+    ) -> Result<(Vec<StoredEvent>, u64), CqrsError> {
         let store = self.events.lock().unwrap();
-        if let Some(events) = store.get(&aggregate_id) {
+        if let Some(events) = store.get(aggregate_id) {
             let version = events.last().map(|e| e.version).unwrap_or(0);
             Ok((events.to_vec(), version))
         } else {

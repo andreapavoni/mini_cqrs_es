@@ -1,9 +1,12 @@
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::future::Future;
+use std::hash::Hash;
+use std::str::FromStr;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{CqrsError, Event, EventPayload, Uuid};
+use crate::{CqrsError, EventPayload, StoredEvent};
 
 pub mod manager;
 pub mod snapshot;
@@ -13,6 +16,9 @@ pub mod snapshot;
 ///
 /// Aggregates track their version for optimistic concurrency control.
 pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + DeserializeOwned {
+    /// The type of identity used by this aggregate.
+    type Id: Clone + Debug + Display + FromStr + Eq + Hash + Send + Sync + 'static;
+
     /// The type of event that this aggregate can handle.
     type Event: EventPayload + Send + Sync;
 
@@ -20,10 +26,10 @@ pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + Deseria
     fn apply(&mut self, event: &Self::Event) -> impl Future<Output = ()> + Send;
 
     /// Returns the aggregate's ID.
-    fn aggregate_id(&self) -> Uuid;
+    fn aggregate_id(&self) -> Self::Id;
 
     /// Sets the aggregate's ID.
-    fn set_aggregate_id(&mut self, id: Uuid);
+    fn set_aggregate_id(&mut self, id: Self::Id);
 
     /// Returns the current version of the aggregate.
     fn version(&self) -> u64 {
@@ -36,7 +42,7 @@ pub trait Aggregate: Clone + Debug + Default + Sync + Send + Serialize + Deseria
     /// Applies a sequence of events to the aggregate's state.
     fn apply_events(
         &mut self,
-        events: &[Event],
+        events: &[StoredEvent],
     ) -> impl Future<Output = Result<(), CqrsError>> + Send {
         async {
             for e in events.iter() {

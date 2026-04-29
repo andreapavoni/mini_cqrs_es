@@ -1,13 +1,13 @@
 use std::future::Future;
 
-use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore, Uuid};
+use crate::{Aggregate, AggregateSnapshot, CqrsError, EventStore, SnapshotStore};
 
 /// The `AggregateManager` trait defines the behavior for loading and storing the state of aggregates.
 ///
 /// All methods take `&self` to allow concurrent access.
 pub trait AggregateManager: Send + Sync {
     /// Loads an aggregate by its ID.
-    fn load<A>(&self, aggregate_id: Uuid) -> impl Future<Output = Result<A, CqrsError>> + Send
+    fn load<A>(&self, aggregate_id: &A::Id) -> impl Future<Output = Result<A, CqrsError>> + Send
     where
         A: Aggregate;
 
@@ -42,11 +42,16 @@ impl<ES> AggregateManager for SimpleAggregateManager<ES>
 where
     ES: EventStore,
 {
-    async fn load<A: Aggregate>(&self, aggregate_id: Uuid) -> Result<A, CqrsError> {
+    async fn load<A: Aggregate>(&self, aggregate_id: &A::Id) -> Result<A, CqrsError> {
         let mut aggregate = A::default();
-        aggregate.set_aggregate_id(aggregate_id);
+        aggregate.set_aggregate_id(aggregate_id.clone());
+        let aggregate_id_str = aggregate_id.to_string();
 
-        if let Ok((events, version)) = self.event_store.load_events(aggregate_id).await {
+        if let Ok((events, version)) = self
+            .event_store
+            .load_events(std::any::type_name::<A>(), &aggregate_id_str)
+            .await
+        {
             aggregate.apply_events(&events).await?;
             aggregate.set_version(version);
         }
@@ -80,17 +85,21 @@ impl<SS> AggregateManager for SnapshotAggregateManager<SS>
 where
     SS: SnapshotStore,
 {
-    async fn load<A>(&self, aggregate_id: Uuid) -> Result<A, CqrsError>
+    async fn load<A>(&self, aggregate_id: &A::Id) -> Result<A, CqrsError>
     where
         A: Aggregate,
     {
-        if let Ok(snapshot) = self.snapshot_store.load_snapshot::<A>(aggregate_id).await {
+        if let Ok(snapshot) = self
+            .snapshot_store
+            .load_snapshot::<A>(aggregate_id)
+            .await
+        {
             let mut aggregate = snapshot.get_payload::<A>()?;
             aggregate.set_version(snapshot.version);
             Ok(aggregate)
         } else {
             let mut aggregate = A::default();
-            aggregate.set_aggregate_id(aggregate_id);
+            aggregate.set_aggregate_id(aggregate_id.clone());
             Ok(aggregate)
         }
     }
