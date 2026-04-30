@@ -144,7 +144,7 @@ impl Command for CmdInitializeHotel {
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<HotelEvent>, CqrsError> {
         if !aggregate.rooms.is_empty() {
-            return Err(CqrsError::Domain("Hotel already initialized".into()));
+            return Err(CqrsError::domain("Hotel already initialized"));
         }
         Ok(vec![HotelEvent::HotelInitialized {
             room_count: self.room_count,
@@ -162,7 +162,7 @@ impl Command for CmdCheckIn {
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<HotelEvent>, CqrsError> {
         match aggregate.rooms.get(&self.room_number) {
-            Some(RoomState::Occupied { .. }) => Err(CqrsError::Domain(format!(
+            Some(RoomState::Occupied { .. }) => Err(CqrsError::domain(format!(
                 "Room {} is occupied",
                 self.room_number
             ))),
@@ -170,7 +170,7 @@ impl Command for CmdCheckIn {
                 room_number: self.room_number,
                 guest_name: self.guest_name.clone(),
             }]),
-            None => Err(CqrsError::Domain(format!(
+            None => Err(CqrsError::domain(format!(
                 "Room {} does not exist",
                 self.room_number
             ))),
@@ -187,14 +187,14 @@ impl Command for CmdCheckOut {
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<HotelEvent>, CqrsError> {
         match aggregate.rooms.get(&self.room_number) {
-            Some(RoomState::Free) => Err(CqrsError::Domain(format!(
+            Some(RoomState::Free) => Err(CqrsError::domain(format!(
                 "Room {} is already free",
                 self.room_number
             ))),
             Some(RoomState::Occupied { .. }) => Ok(vec![HotelEvent::GuestCheckedOut {
                 room_number: self.room_number,
             }]),
-            None => Err(CqrsError::Domain(format!(
+            None => Err(CqrsError::domain(format!(
                 "Room {} does not exist",
                 self.room_number
             ))),

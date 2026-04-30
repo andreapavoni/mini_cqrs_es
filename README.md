@@ -114,6 +114,48 @@ impl Command for CmdStartGame {
 }
 ```
 
+Keep command error semantics explicit:
+
+- business/domain rule failures should use `CqrsError::domain(...)`;
+- command/application preconditions should use `CqrsError::invariant(...)`;
+- source-preserving forms are available as `domain_source(...)` and `invariant_source(...)`.
+
+```rust
+#[derive(Debug, thiserror::Error)]
+enum GameError {
+    #[error("game is already finished")]
+    AlreadyFinished,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("command targets aggregate `{command_id}` but stream is `{stream_id}`")]
+struct CommandTargetMismatch {
+    command_id: GameId,
+    stream_id: GameId,
+}
+
+impl Command for CmdAttackPlayer {
+    type Aggregate = GameAggregate;
+
+    async fn handle(&self, aggregate: &GameAggregate) -> Result<Vec<GameEvent>, CqrsError> {
+        if aggregate.is_finished() {
+            return Err(CqrsError::domain_source(GameError::AlreadyFinished));
+        }
+
+        if self.game_id != aggregate.aggregate_id() {
+            return Err(CqrsError::invariant_source(CommandTargetMismatch {
+                command_id: self.game_id.clone(),
+                stream_id: aggregate.aggregate_id(),
+            }));
+        }
+
+        Ok(vec![GameEvent::PlayerAttacked {
+            attacker: self.attacker.clone(),
+        }])
+    }
+}
+```
+
 Event payloads remain pure domain events; aggregate identity and infrastructure metadata live in `StoredEvent`.
 
 Aggregate IDs are typed at the domain boundary:

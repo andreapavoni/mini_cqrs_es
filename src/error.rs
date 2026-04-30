@@ -1,3 +1,6 @@
+use std::error::Error as StdError;
+use std::fmt::Display;
+
 /// An error that can occur in a CQRS application.
 #[derive(Debug, thiserror::Error)]
 pub enum CqrsError {
@@ -21,6 +24,18 @@ pub enum CqrsError {
     #[error("{0}")]
     Domain(String),
 
+    /// A domain/business logic error occurred, preserving the original source error.
+    #[error("{0}")]
+    DomainSource(#[source] Box<dyn StdError + Send + Sync>),
+
+    /// A command/application invariant was violated before events could be committed.
+    #[error("{0}")]
+    CommandInvariant(String),
+
+    /// A command/application invariant was violated, preserving the original source error.
+    #[error("{0}")]
+    CommandInvariantSource(#[source] Box<dyn StdError + Send + Sync>),
+
     /// A concurrency conflict occurred (optimistic locking).
     #[error("concurrency conflict: expected version {expected_version}, got {actual_version}")]
     Conflict {
@@ -35,19 +50,45 @@ pub enum CqrsError {
 
 impl CqrsError {
     /// Creates a domain error. Convenience constructor.
-    pub fn new(message: String) -> Self {
-        Self::Domain(message)
+    pub fn new(message: impl Display) -> Self {
+        Self::domain(message)
+    }
+
+    /// Creates a domain/business error from any displayable value.
+    pub fn domain(error: impl Display) -> Self {
+        Self::Domain(error.to_string())
+    }
+
+    /// Creates a domain/business error while preserving the original source.
+    pub fn domain_source<E>(error: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        Self::DomainSource(Box::new(error))
+    }
+
+    /// Creates a command/application invariant error from any displayable value.
+    pub fn invariant(error: impl Display) -> Self {
+        Self::CommandInvariant(error.to_string())
+    }
+
+    /// Creates a command/application invariant error while preserving the original source.
+    pub fn invariant_source<E>(error: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        Self::CommandInvariantSource(Box::new(error))
     }
 }
 
 impl From<&str> for CqrsError {
     fn from(msg: &str) -> Self {
-        Self::Domain(msg.to_string())
+        Self::domain(msg)
     }
 }
 
 impl From<String> for CqrsError {
     fn from(msg: String) -> Self {
-        Self::Domain(msg)
+        Self::domain(msg)
     }
 }

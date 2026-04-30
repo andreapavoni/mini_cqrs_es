@@ -6,7 +6,13 @@ use crate::{Aggregate, CqrsError};
 ///
 /// A command is a request to change the state of an aggregate. Commands are handled by the
 /// aggregate itself, and they return a list of domain events that describe the state changes.
-/// The framework wraps these into `Event` structs with the aggregate ID and version.
+/// The framework persists these as event envelopes with the aggregate ID, version, and metadata.
+///
+/// Command implementations should keep error semantics explicit:
+/// - use [`CqrsError::Domain`] or [`CqrsError::domain`] for business/domain rule failures;
+/// - use [`CqrsError::CommandInvariant`] or [`CqrsError::invariant`] for command/application
+///   preconditions such as aggregate/stream mismatches, stale command targets, or invalid
+///   command routing.
 ///
 /// ## Example
 ///

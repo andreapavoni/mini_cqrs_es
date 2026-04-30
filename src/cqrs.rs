@@ -29,8 +29,9 @@ pub trait Cqrs: QueryRunner + Send + Sync {
 ///
 /// The execution flow:
 /// 1. Load aggregate from the aggregate manager
-/// 2. Execute the command, getting domain events
-/// 3. Wrap domain events into `Event` structs with version tracking
+/// 2. Execute the command, getting domain events or a semantic error
+///    (`Domain` for business rules, `CommandInvariant` for application preconditions)
+/// 3. Wrap domain events into `NewEvent` structs
 /// 4. Save events to the event store (with optimistic concurrency check)
 /// 5. Apply events to the aggregate
 /// 6. Process events through consumers

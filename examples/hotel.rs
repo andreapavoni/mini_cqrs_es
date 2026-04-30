@@ -75,7 +75,10 @@ async fn main() -> mini_cqrs_es::anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mini_cqrs_es::Command;
     use mini_cqrs_es::{AggregateManager, CqrsError, EventConsumer, StoredEvent};
+    use std::error::Error as StdError;
+    use std::fmt;
     use std::str::FromStr;
 
     async fn setup() -> (
@@ -407,7 +410,7 @@ mod tests {
 
     impl EventConsumer for FailingConsumer {
         async fn process(&self, _event: &StoredEvent) -> Result<(), CqrsError> {
-            Err(CqrsError::Domain("projection failure".into()))
+            Err(CqrsError::domain("projection failure"))
         }
     }
 
@@ -428,5 +431,47 @@ mod tests {
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), CqrsError::Domain(_)));
+    }
+
+    struct CmdInvariantFailure;
+
+    impl Command for CmdInvariantFailure {
+        type Aggregate = HotelAggregate;
+
+        async fn handle(&self, _aggregate: &Self::Aggregate) -> Result<Vec<HotelEvent>, CqrsError> {
+            Err(CqrsError::invariant("stale command target"))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_invariant_failure_is_distinct_from_domain_failure() {
+        let (cqrs, _read_model, hotel_id) = setup().await;
+
+        let result = cqrs.execute(&hotel_id, &CmdInvariantFailure).await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CqrsError::CommandInvariant(_)
+        ));
+    }
+
+    #[derive(Debug)]
+    struct AppInvariantError;
+
+    impl fmt::Display for AppInvariantError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "aggregate target mismatch")
+        }
+    }
+
+    impl StdError for AppInvariantError {}
+
+    #[test]
+    fn test_invariant_source_preserves_display_and_source() {
+        let error = CqrsError::invariant_source(AppInvariantError);
+
+        assert_eq!(error.to_string(), "aggregate target mismatch");
+        assert!(StdError::source(&error).is_some());
     }
 }

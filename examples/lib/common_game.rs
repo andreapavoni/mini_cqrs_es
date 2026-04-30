@@ -112,7 +112,7 @@ impl Command for CmdStartGame {
 
     async fn handle(&self, aggregate: &Self::Aggregate) -> Result<Vec<GameEvent>, CqrsError> {
         if aggregate.status != GameStatus::Playing {
-            return Err(CqrsError::Domain(format!(
+            return Err(CqrsError::domain(format!(
                 "Game is already finished with state {:?}",
                 aggregate.status
             )));
