@@ -4,6 +4,18 @@ use std::fmt::Display;
 /// An error that can occur in a CQRS application.
 #[derive(Debug, thiserror::Error)]
 pub enum CqrsError {
+    /// Operational failure retaining the original driver or I/O error.
+    #[error("{operation}: {source}")]
+    Storage {
+        operation: &'static str,
+        #[source]
+        source: Box<dyn StdError + Send + Sync>,
+    },
+
+    /// Invalid event kind or unsupported persisted schema revision.
+    #[error("event format error: {0}")]
+    EventFormat(String),
+
     /// The aggregate was not found.
     #[error("aggregate not found: {0}")]
     AggregateNotFound(String),
@@ -49,6 +61,13 @@ pub enum CqrsError {
 }
 
 impl CqrsError {
+    pub fn storage(operation: &'static str, source: impl StdError + Send + Sync + 'static) -> Self {
+        Self::Storage {
+            operation,
+            source: Box::new(source),
+        }
+    }
+
     /// Creates a domain error. Convenience constructor.
     pub fn new(message: impl Display) -> Self {
         Self::domain(message)

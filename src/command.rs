@@ -33,7 +33,9 @@ pub trait Command: Send + Sync {
     /// The type of aggregate that this command handles.
     type Aggregate: Aggregate;
 
-    /// Handles the command and returns a list of domain events.
+    /// Inspects domain state and returns domain events. Runtime identity and
+    /// version live in `LoadedAggregate`, not in this argument. Validate any
+    /// request-specific stream routing in the application before execution.
     fn handle(
         &self,
         aggregate: &Self::Aggregate,

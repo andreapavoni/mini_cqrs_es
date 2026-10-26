@@ -1,21 +1,6 @@
-#![allow(dead_code)]
-
-use std::{
-    collections::HashMap,
-    fmt,
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
-
+use mini_cqrs_es::{Aggregate, Command, CqrsError, EventPayload};
 use serde::{Deserialize, Serialize};
-
-use mini_cqrs_es::{
-    Aggregate, Command, CqrsError, EventConsumer, EventPayload, Query, StoredEvent,
-};
-
-#[path = "sqlite_store.rs"]
-mod sqlite_store;
-pub use sqlite_store::*;
+use std::{collections::HashMap, fmt, str::FromStr};
 
 // --- Room State ---
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -51,9 +36,16 @@ pub enum RoomState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HotelEvent {
-    HotelInitialized { room_count: u32 },
-    GuestCheckedIn { room_number: u32, guest_name: String },
-    GuestCheckedOut { room_number: u32 },
+    HotelInitialized {
+        room_count: u32,
+    },
+    GuestCheckedIn {
+        room_number: u32,
+        guest_name: String,
+    },
+    GuestCheckedOut {
+        room_number: u32,
+    },
 }
 
 impl fmt::Display for HotelEvent {
@@ -66,30 +58,30 @@ impl fmt::Display for HotelEvent {
     }
 }
 
-impl EventPayload for HotelEvent {}
+impl EventPayload for HotelEvent {
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::HotelInitialized { .. } => "HotelInitialized",
+            Self::GuestCheckedIn { .. } => "GuestCheckedIn",
+            Self::GuestCheckedOut { .. } => "GuestCheckedOut",
+        }
+    }
+}
 
 // --- Aggregate ---
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HotelAggregate {
-    id: HotelId,
-    version: u64,
     pub rooms: HashMap<u32, RoomState>,
-}
-
-impl Default for HotelAggregate {
-    fn default() -> Self {
-        Self {
-            id: HotelId::new(0),
-            version: 0,
-            rooms: HashMap::new(),
-        }
-    }
 }
 
 impl Aggregate for HotelAggregate {
     type Id = HotelId;
     type Event = HotelEvent;
+
+    fn aggregate_type() -> &'static str {
+        "example.hotel"
+    }
 
     async fn apply(&mut self, event: &Self::Event) {
         match event {
@@ -114,22 +106,6 @@ impl Aggregate for HotelAggregate {
                 self.rooms.insert(*room_number, RoomState::Free);
             }
         }
-    }
-
-    fn aggregate_id(&self) -> Self::Id {
-        self.id.clone()
-    }
-
-    fn set_aggregate_id(&mut self, id: Self::Id) {
-        self.id = id;
-    }
-
-    fn version(&self) -> u64 {
-        self.version
-    }
-
-    fn set_version(&mut self, version: u64) {
-        self.version = version;
     }
 }
 
@@ -199,74 +175,5 @@ impl Command for CmdCheckOut {
                 self.room_number
             ))),
         }
-    }
-}
-
-// --- Read Model ---
-
-#[derive(Clone, Debug, Default)]
-pub struct HotelReadModel {
-    pub rooms: HashMap<u32, RoomState>,
-}
-
-// --- Projection Consumer ---
-
-#[derive(Clone)]
-pub struct HotelProjectionConsumer {
-    read_model: Arc<Mutex<HotelReadModel>>,
-}
-
-impl HotelProjectionConsumer {
-    pub fn new(read_model: Arc<Mutex<HotelReadModel>>) -> Self {
-        Self { read_model }
-    }
-}
-
-impl EventConsumer for HotelProjectionConsumer {
-    async fn process(&self, evt: &StoredEvent) -> Result<(), CqrsError> {
-        let event = evt.get_payload::<HotelEvent>()?;
-
-        let mut model = self.read_model.lock().unwrap();
-        match event {
-            HotelEvent::HotelInitialized { room_count } => {
-                model.rooms.clear();
-                for i in 1..=room_count {
-                    model.rooms.insert(i, RoomState::Free);
-                }
-            }
-            HotelEvent::GuestCheckedIn {
-                room_number,
-                guest_name,
-            } => {
-                model
-                    .rooms
-                    .insert(room_number, RoomState::Occupied { guest_name });
-            }
-            HotelEvent::GuestCheckedOut { room_number } => {
-                model.rooms.insert(room_number, RoomState::Free);
-            }
-        }
-        Ok(())
-    }
-}
-
-// --- Query ---
-
-#[derive(Clone)]
-pub struct GetHotelStateQuery {
-    read_model: Arc<Mutex<HotelReadModel>>,
-}
-
-impl GetHotelStateQuery {
-    pub fn new(read_model: Arc<Mutex<HotelReadModel>>) -> Self {
-        Self { read_model }
-    }
-}
-
-impl Query for GetHotelStateQuery {
-    type Output = HotelReadModel;
-
-    async fn apply(&self) -> HotelReadModel {
-        self.read_model.lock().unwrap().clone()
     }
 }

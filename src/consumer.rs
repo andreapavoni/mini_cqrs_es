@@ -54,6 +54,12 @@ impl EventConsumers {
         self
     }
 
+    /// Appends another pipeline, preserving registration order.
+    pub fn extend(mut self, mut other: Self) -> Self {
+        self.consumers.append(&mut other.consumers);
+        self
+    }
+
     /// Processes an event through all consumers sequentially.
     pub async fn process(&self, event: &StoredEvent) -> Result<(), CqrsError> {
         for consumer in &self.consumers {

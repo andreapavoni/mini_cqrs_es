@@ -1,22 +1,88 @@
 name: CI
-
 on:
   push:
-    branches: [ "master" ]
+    branches: [master]
   pull_request:
-    branches: [ "master" ]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  core:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Clippy
-      run: cargo clippy
-    - name: Run tests
-      run: cargo run --example game
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo fmt --manifest-path examples/hotel/Cargo.toml --check
+      - run: cargo check --no-default-features --lib
+      - run: cargo test --no-default-features
+      - run: cargo clippy --no-default-features --all-targets -- -D warnings
+      - run: cargo doc --no-default-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  turso:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy
+      - run: cargo test --features turso --all-targets
+      - run: cargo clippy --features turso --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path examples/hotel/Cargo.toml --features turso -- -D warnings
+      - name: Run the full application
+        env:
+          EVENTS_DATABASE_URL: turso:/tmp/hotel-events.db
+          READ_MODELS_DATABASE_URL: turso:/tmp/hotel-reads.db
+        run: |
+          cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- init
+          cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- create 1 3
+          cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- check-in 1 2 Andrea
+          cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- show 1
+          cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- rebuild turso:/tmp/hotel-rebuilt.db
+          READ_MODELS_DATABASE_URL=turso:/tmp/hotel-rebuilt.db cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- show 1
+
+  postgresql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: events
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      EVENTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/events
+      READ_MODELS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/read_models
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy
+      - name: Provision isolated example databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d events -c 'CREATE DATABASE read_models'
+          psql -h 127.0.0.1 -U postgres -d events -c 'CREATE DATABASE rebuilt'
+      - run: cargo test --features postgresql --all-targets
+      - run: cargo clippy --features postgresql --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path examples/hotel/Cargo.toml --features postgresql -- -D warnings
+      - name: Run the full application on PostgreSQL
+        run: |
+          cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- init
+          cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- create 1 3
+          cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- check-in 1 2 Andrea
+          cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- show 1
+          cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- rebuild postgresql://postgres:postgres@127.0.0.1:5432/rebuilt
+          READ_MODELS_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/rebuilt cargo run --manifest-path examples/hotel/Cargo.toml --features postgresql -- show 1

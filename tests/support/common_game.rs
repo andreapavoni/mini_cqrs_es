@@ -1,25 +1,10 @@
 #![allow(dead_code)]
-
-// Common code shared in the examples to avoid repetitions and focus on the core concepts
-
-use std::{
-    collections::HashMap,
-    fmt,
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
-
-use serde::{Deserialize, Serialize};
-
+use super::read_store::read_error;
 use mini_cqrs_es::{
-    Aggregate, AggregateSnapshot, Command, CqrsError, EventConsumer, EventPayload, Query,
-    Repository, SnapshotStore, StoredEvent,
+    Aggregate, Command, CqrsError, EventPayload, Projection, Query, StoredEvent, toasty,
 };
-
-#[path = "common.rs"]
-mod common;
-pub use common::*;
-
+use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GameId(String);
 
@@ -40,62 +25,6 @@ impl FromStr for GameId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.to_string()))
-    }
-}
-
-// Snapshot Store
-pub struct InMemorySnapshotStore<T>
-where
-    T: Aggregate,
-{
-    snapshots: Mutex<HashMap<String, AggregateSnapshot<T>>>,
-}
-
-impl<T> InMemorySnapshotStore<T>
-where
-    T: Aggregate,
-{
-    pub fn new() -> Self {
-        InMemorySnapshotStore {
-            snapshots: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl<A> SnapshotStore for InMemorySnapshotStore<A>
-where
-    A: Aggregate,
-{
-    async fn save_snapshot<T>(&self, snapshot: AggregateSnapshot<T>) -> Result<(), CqrsError>
-    where
-        T: Aggregate,
-    {
-        let aggregate = snapshot.get_payload::<A>()?;
-        let snapshot = AggregateSnapshot::new(&aggregate, Some(snapshot.version))?;
-        let aggregate_id = snapshot.aggregate_id.to_string();
-
-        let mut store = self.snapshots.lock().unwrap();
-        store.insert(aggregate_id, snapshot);
-        Ok(())
-    }
-
-    async fn load_snapshot<T>(
-        &self,
-        aggregate_id: &T::Id,
-    ) -> Result<AggregateSnapshot<T>, CqrsError>
-    where
-        T: Aggregate,
-    {
-        let store = self.snapshots.lock().unwrap();
-        if let Some(snapshot) = store.get(&aggregate_id.to_string()) {
-            let aggregate = snapshot.get_payload::<T>()?;
-            Ok(AggregateSnapshot::new(&aggregate, Some(snapshot.version))?)
-        } else {
-            Err(CqrsError::SnapshotStore(format!(
-                "No snapshot for aggregate id `{}`",
-                aggregate_id
-            )))
-        }
     }
 }
 
@@ -184,7 +113,15 @@ impl fmt::Display for GameEvent {
     }
 }
 
-impl EventPayload for GameEvent {}
+impl EventPayload for GameEvent {
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::GameStarted { .. } => "GameStarted",
+            Self::PlayerAttacked { .. } => "PlayerAttacked",
+            Self::GameEndedWithWinner { .. } => "GameEndedWithWinner",
+        }
+    }
+}
 
 // Aggregate: it's a more complex data structure with structs and enums as field values.
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -202,8 +139,6 @@ pub enum GameStatus {
 // Game aggregate
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameAggregate {
-    id: GameId,
-    version: u64,
     player_1: Player,
     player_2: Player,
     status: GameStatus,
@@ -213,8 +148,6 @@ pub struct GameAggregate {
 impl Default for GameAggregate {
     fn default() -> Self {
         Self {
-            id: GameId::new(uuid::Uuid::new_v4().to_string()),
-            version: 0,
             player_1: Player {
                 id: "player_1".to_string(),
                 points: 0,
@@ -232,6 +165,10 @@ impl Default for GameAggregate {
 impl Aggregate for GameAggregate {
     type Id = GameId;
     type Event = GameEvent;
+
+    fn aggregate_type() -> &'static str {
+        "example.game"
+    }
 
     async fn apply(&mut self, event: &Self::Event) {
         match event {
@@ -259,72 +196,21 @@ impl Aggregate for GameAggregate {
             }
         };
     }
-
-    fn aggregate_id(&self) -> Self::Id {
-        self.id.clone()
-    }
-
-    fn set_aggregate_id(&mut self, id: Self::Id) {
-        self.id = id;
-    }
-
-    fn version(&self) -> u64 {
-        self.version
-    }
-
-    fn set_version(&mut self, version: u64) {
-        self.version = version;
-    }
 }
 
-// Repository: a simple storage to project aggregate data so that it can be read/updated from the
-// outside.
-
-#[derive(Default, Clone, Debug)]
-pub struct InMemoryRepository {
-    games: HashMap<GameId, GameModel>,
+#[derive(Debug, toasty::Model)]
+#[table = "game_read_models"]
+pub struct GameReadModel {
+    #[key]
+    pub id: String,
+    pub goal: u32,
+    pub player_1_id: String,
+    pub player_1_points: u32,
+    pub player_2_id: String,
+    pub player_2_points: u32,
+    pub winner_id: Option<String>,
+    pub winner_points: u32,
 }
-
-impl InMemoryRepository {
-    pub fn new() -> Self {
-        InMemoryRepository {
-            games: HashMap::new(),
-        }
-    }
-
-    pub fn get_game(&self, id: &GameId) -> Option<GameModel> {
-        self.games.get(id).cloned()
-    }
-
-    pub fn update_game(&mut self, id: GameId, read_model: GameModel) {
-        self.games.insert(id, read_model);
-    }
-}
-
-impl Repository for InMemoryRepository {}
-
-#[derive(Clone)]
-pub struct GetGameQuery {
-    aggregate_id: GameId,
-    repo: Arc<Mutex<InMemoryRepository>>,
-}
-
-impl GetGameQuery {
-    pub fn new(aggregate_id: GameId, repo: Arc<Mutex<InMemoryRepository>>) -> Self {
-        Self { aggregate_id, repo }
-    }
-}
-
-impl Query for GetGameQuery {
-    type Output = Result<Option<GameModel>, CqrsError>;
-
-    async fn apply(&self) -> Self::Output {
-        let repo = self.repo.lock().unwrap();
-        Ok(repo.get_game(&self.aggregate_id))
-    }
-}
-
-// Read model: stores game data.
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameModel {
@@ -335,88 +221,124 @@ pub struct GameModel {
     pub status: GameStatus,
 }
 
-// Consumer: it contains an instance of the repository, so that it can write updates on it when
-// some event happens.
-
 #[derive(Clone)]
-pub struct GameMainConsumer {
-    repo: Arc<Mutex<InMemoryRepository>>,
+pub struct GetGameQuery {
+    aggregate_id: GameId,
+    database: toasty::Db,
 }
-
-impl GameMainConsumer {
-    pub fn new(repo: Arc<Mutex<InMemoryRepository>>) -> Self {
-        Self { repo }
+impl GetGameQuery {
+    pub fn new(aggregate_id: GameId, database: toasty::Db) -> Self {
+        Self {
+            aggregate_id,
+            database,
+        }
     }
 }
-
-impl EventConsumer for GameMainConsumer {
-    async fn process(&self, evt: &StoredEvent) -> Result<(), CqrsError> {
-        let event = evt.get_payload::<GameEvent>()?;
-
-        match event {
-            GameEvent::GameStarted {
+impl Query for GetGameQuery {
+    type Output = Result<Option<GameModel>, CqrsError>;
+    async fn apply(&self) -> Self::Output {
+        let mut database = self.database.clone();
+        let row = GameReadModel::filter_by_id(self.aggregate_id.to_string())
+            .first()
+            .exec(&mut database)
+            .await
+            .map_err(read_error)?;
+        Ok(row.map(|row| {
+            let player_1 = Player {
+                id: row.player_1_id,
+                points: row.player_1_points,
+            };
+            let player_2 = Player {
+                id: row.player_2_id,
+                points: row.player_2_points,
+            };
+            let status = row.winner_id.map_or(GameStatus::Playing, |id| {
+                GameStatus::Winner(Player {
+                    id,
+                    points: row.winner_points,
+                })
+            });
+            GameModel {
+                id: self.aggregate_id.clone(),
+                goal: row.goal,
                 player_1,
                 player_2,
-                goal,
-            } => {
-                let model = GameModel {
-                    id: GameId::new(evt.aggregate_id.clone()),
-                    player_1: player_1.clone(),
-                    player_2: player_2.clone(),
-                    goal,
-                    status: GameStatus::Playing,
-                };
-                self.repo
-                    .lock()
-                    .unwrap()
-                    .update_game(GameId::new(evt.aggregate_id.clone()), model);
+                status,
             }
-            GameEvent::PlayerAttacked { attacker } => {
-                let mut repo = self.repo.lock().unwrap();
-                if let Some(mut model) = repo.get_game(&GameId::new(evt.aggregate_id.clone())) {
-                    if model.player_1.id == attacker.id {
-                        model.player_1.points += 1;
-                    } else {
-                        model.player_2.points += 1;
-                    }
-                    repo.update_game(GameId::new(evt.aggregate_id.clone()), model);
-                }
-            }
-            GameEvent::GameEndedWithWinner { winner } => {
-                let mut repo = self.repo.lock().unwrap();
-                if let Some(mut model) = repo.get_game(&GameId::new(evt.aggregate_id.clone())) {
-                    model.status = GameStatus::Winner(winner.clone());
-                    repo.update_game(GameId::new(evt.aggregate_id.clone()), model);
-                }
-            }
-        }
-        Ok(())
+        }))
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PrintEventConsumer {}
+#[derive(Clone)]
+pub struct GameProjection;
 
-impl EventConsumer for PrintEventConsumer {
-    async fn process(&self, event: &StoredEvent) -> Result<(), CqrsError> {
-        let payload = event.get_payload::<GameEvent>()?;
+impl Projection for GameProjection {
+    type Aggregate = GameAggregate;
 
+    fn name() -> &'static str {
+        "game"
+    }
+
+    async fn apply(
+        &self,
+        event: &StoredEvent,
+        payload: GameEvent,
+        executor: &mut dyn toasty::Executor,
+    ) -> Result<(), CqrsError> {
         match payload {
             GameEvent::GameStarted {
                 player_1,
                 player_2,
                 goal,
             } => {
-                println!(
-                    "LOG: Game started. (Player 1: `{}`, Player 2: `{}`, Goal: `{}`)",
-                    player_1.id, player_2.id, goal
-                )
+                GameReadModel::upsert_by_id(&event.aggregate_id)
+                    .goal(goal)
+                    .player_1_id(player_1.id)
+                    .player_1_points(player_1.points)
+                    .player_2_id(player_2.id)
+                    .player_2_points(player_2.points)
+                    .winner_id(None::<String>)
+                    .winner_points(0u32)
+                    .exec(&mut *executor)
+                    .await
+                    .map_err(read_error)?;
             }
             GameEvent::PlayerAttacked { attacker } => {
-                println!("LOG: {} has attacked his opponent", attacker.id)
+                let mut row = GameReadModel::get_by_id(&mut *executor, &event.aggregate_id)
+                    .await
+                    .map_err(read_error)?;
+                if row.player_1_id == attacker.id {
+                    let points = row
+                        .player_1_points
+                        .checked_add(1)
+                        .ok_or_else(|| CqrsError::EventStore("read-model score overflow".into()))?;
+                    row.update()
+                        .player_1_points(points)
+                        .exec(&mut *executor)
+                        .await
+                        .map_err(read_error)?;
+                } else {
+                    let points = row
+                        .player_2_points
+                        .checked_add(1)
+                        .ok_or_else(|| CqrsError::EventStore("read-model score overflow".into()))?;
+                    row.update()
+                        .player_2_points(points)
+                        .exec(&mut *executor)
+                        .await
+                        .map_err(read_error)?;
+                }
             }
             GameEvent::GameEndedWithWinner { winner } => {
-                println!("LOG: Game ended with winner: {}", winner.id)
+                let mut row = GameReadModel::get_by_id(&mut *executor, &event.aggregate_id)
+                    .await
+                    .map_err(read_error)?;
+                row.update()
+                    .winner_id(Some(winner.id))
+                    .winner_points(winner.points)
+                    .exec(&mut *executor)
+                    .await
+                    .map_err(read_error)?;
             }
         }
         Ok(())

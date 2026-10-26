@@ -1,0 +1,20 @@
+[package]
+name = "hotel-cqrs-example"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[features]
+default = []
+turso = ["mini_cqrs_es/turso"]
+postgresql = ["mini_cqrs_es/postgresql"]
+
+[dependencies]
+mini_cqrs_es = { path = "../.." }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[[bin]]
+name = "hotel"
+path = "main.rs"

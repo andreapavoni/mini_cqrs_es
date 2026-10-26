@@ -1,3 +1,8 @@
 /target
 Cargo.lock
 .indxr-cache/
+
+# Local hotel example databases
+/hotel-*.db*
+
+/examples/hotel/target
