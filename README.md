@@ -1,229 +1,387 @@
-# MiniCQRS/ES - Simplifying CQRS for Rust
+# MiniCQRS/ES
 
-Simple, minimal, opinionated micro-framework to implement CQRS/ES in Rust. There are already a lot of opinionated libraries to do that but, in fact, I didn't agree with their
-opinions and I've seen an opportunity to improve my knowledge and practice with Rust.
+A lightweight CQRS/event-sourcing library for Rust. Define your domain rules and
+read models; the library handles event persistence, aggregate recovery,
+transactional projection delivery and optional snapshots.
 
-This lightweight library offers the necessary components abstractions and minimal glue to streamline the implementation of CQRS architecture, making it a breeze to manage your application's data flow.
+**Start here:** [the complete hotel application](examples/hotel/README.md) includes
+commands, an event family, multiple Toasty read models, queries, snapshots,
+catch-up and a read-database rebuild. It is a standalone package that depends on
+this library exactly as an application would.
 
-## Features
-
-- It's a microframework, so _micro_ that you mostly get only the _frame_, the _work_ is on you:
-  - you write your own implementations;
-  - you choose the libraries, storage engines, and other external tools;
-  - you can pick only the pieces you need (aggregate, command, events, queries, etc...).
-
-- Fully async — uses native `async fn` in traits (no `async_trait` dependency).
-- All trait methods take `&self`, enabling safe concurrent command execution.
-- Built-in optimistic concurrency control via event versioning.
-- `anyhow` re-exported so you don't need a separate dependency.
-
-### Architecture
-
-- **Aggregates:** Define your domain entities as aggregates, handle state changes, and apply events with straightforward traits.
-
-- **Commands:** Implement custom commands that return domain events directly. The framework persists them as event envelopes with versioning and metadata.
-
-- **Event Store:** Store and retrieve persisted envelopes (`StoredEvent`) with optimistic concurrency built in. Implement the trait against any storage backend (SQLite, Postgres, Redis, etc.).
-
-- **Snapshot Store:** Optionally use snapshots to speed up aggregate state recovery from long event streams.
-
-- **Event Consumers:** Process persisted events through a composable consumer pipeline; consumers are fallible and can abort command execution.
-
-- **Queries:** Implement custom queries to retrieve data from your read models.
-
-- **Error Handling:** Structured `CqrsError` enum with variants for domain errors, conflicts, serialization failures, and more. `anyhow` is re-exported for ergonomic application-level error handling.
-
-## Status
-
-The library is somewhat usable for experimenting on some real use cases, but I wouldn't recommend
-it for production use yet. The API is still **under active development — breaking changes can be introduced**.
-
-## Installation
-
-Run the following Cargo command in your project directory:
-
-```sh
-cargo add mini_cqrs_es
-```
-
-Or add the following line to your `Cargo.toml`:
+Version **0.12.0** requires Rust **1.95+**. Select a Toasty driver explicitly;
+**no database driver is enabled by default**:
 
 ```toml
 [dependencies]
-mini_cqrs_es = "0.9.0"
+mini_cqrs_es = { version = "0.12", features = ["postgresql"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
-## Usage
+Use `features = ["turso"]` for local file-backed examples/testing. Toasty is
+pinned to 0.11.0 and re-exported, so application models do not need a separate
+Toasty dependency. Connection URLs and database provisioning belong to the
+application; the library has no filesystem or environment-variable policy.
 
-Once you have added the library to your project's dependencies, import it:
+## What you build, what the library handles
+
+You write domain state, events, commands, projections and queries. **Toasty is
+re-exported as `mini_cqrs_es::toasty` for your read models and native queries.**
+You do not select a separate Toasty implementation of CQRS: the built-in types
+are named for their responsibilities.
+
+| Type | Responsibility |
+| --- | --- |
+| `EventLog` | Persist immutable events and enforce expected stream versions |
+| `ReadModels` | Open your read database and register framework checkpoint storage |
+| `Projection` | Your logic for updating read models from a typed event |
+| `Projector` | Run that logic and commit its checkpoint in the same transaction |
+| `SimpleCqrs` | Recover state, handle a command, append events, then deliver them |
+| `SnapshotCache` | Optional stored state that speeds up aggregate recovery |
+
+```mermaid
+flowchart LR
+    Command --> State[Recovered aggregate state]
+    State --> Events[Domain events]
+    Events --> EventLog
+    EventLog --> Projector
+    Projector --> ReadModels
+    ReadModels --> Query
+    EventLog -->|replay| State
+```
+
+Keep **two databases**: event history and its snapshot cache in one; your
+read models and their checkpoints in the other. Read models can be rebuilt from
+events. Data that was never recorded in events needs another recovery source.
+
+## Build a counter
+
+The steps below show a small counter. For a complete runnable application,
+follow [the hotel walkthrough](examples/hotel/README.md).
+
+### 1. Define state and the facts that change it
 
 ```rust
 use mini_cqrs_es::*;
-// or selectively:
-// use mini_cqrs_es::{Aggregate, Command, SimpleCqrs, EventConsumers, ...};
-```
+use serde::{Deserialize, Serialize};
 
-Being made almost entirely of traits, MiniCQRS/ES is flexible but requires some boilerplate.
-Check out the [examples directory](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples) for complete implementations.
+#[derive(Default, Serialize, Deserialize)]
+struct Counter { value: u32 }
 
-When you have implemented the various traits, you can wire up your CQRS architecture.
-
-Here's a snippet inspired by the [game example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/game.rs):
-
-```rust
-// An implementation of the EventStore trait (backed by any storage engine you choose)
-let event_store = InMemoryEventStore::new();
-// An implementation of the SnapshotStore trait (optional — for faster aggregate loading)
-let snapshot_store = InMemorySnapshotStore::<GameAggregate>::new();
-// SnapshotAggregateManager is provided by MiniCQRS/ES
-let aggregate_manager = SnapshotAggregateManager::new(snapshot_store);
-
-// Build a consumer pipeline with the builder pattern
-let repo = Arc::new(Mutex::new(InMemoryRepository::new()));
-let consumers = EventConsumers::new()
-    .with(GameMainConsumer::new(repo.clone()))
-    .with(PrintEventConsumer {});
-
-// SimpleCqrs is provided by MiniCQRS/ES and wires everything together
-// Note: takes &self — safe to share across async tasks via Arc
-let cqrs = SimpleCqrs::new(aggregate_manager, event_store, consumers);
-
-// Build a command and execute it
-let aggregate_id = GameId::new(uuid::Uuid::new_v4().to_string());
-let cmd = CmdStartGame { player_1, player_2, goal: 3 };
-cqrs.execute(&aggregate_id, &cmd).await?;
-
-// Query the read model
-let query = GetGameQuery::new(aggregate_id.clone(), repo.clone());
-let result = cqrs.query(&query).await?.unwrap();
-```
-
-Commands return domain-specific event types directly. The framework converts them to `NewEvent`, persists them, and then processes returned `StoredEvent` envelopes:
-
-```rust
-impl Command for CmdStartGame {
-    type Aggregate = GameAggregate;
-
-    async fn handle(&self, aggregate: &GameAggregate) -> Result<Vec<GameEvent>, CqrsError> {
-        Ok(vec![GameEvent::GameStarted {
-            player_1: self.player_1.clone(),
-            player_2: self.player_2.clone(),
-            goal: self.goal,
-        }])
-    }
-}
-```
-
-Keep command error semantics explicit:
-
-- business/domain rule failures should use `CqrsError::domain(...)`;
-- command/application preconditions should use `CqrsError::invariant(...)`;
-- source-preserving forms are available as `domain_source(...)` and `invariant_source(...)`.
-
-```rust
-#[derive(Debug, thiserror::Error)]
-enum GameError {
-    #[error("game is already finished")]
-    AlreadyFinished,
+#[derive(Serialize, Deserialize)]
+enum CounterEvent {
+    Added { amount: u32 },
+    Reset,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("command targets aggregate `{command_id}` but stream is `{stream_id}`")]
-struct CommandTargetMismatch {
-    command_id: GameId,
-    stream_id: GameId,
-}
-
-impl Command for CmdAttackPlayer {
-    type Aggregate = GameAggregate;
-
-    async fn handle(&self, aggregate: &GameAggregate) -> Result<Vec<GameEvent>, CqrsError> {
-        if aggregate.is_finished() {
-            return Err(CqrsError::domain_source(GameError::AlreadyFinished));
+impl EventPayload for CounterEvent {
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::Added { .. } => "counter.added",
+            Self::Reset => "counter.reset",
         }
+    }
+}
 
-        if self.game_id != aggregate.aggregate_id() {
-            return Err(CqrsError::invariant_source(CommandTargetMismatch {
-                command_id: self.game_id.clone(),
-                stream_id: aggregate.aggregate_id(),
-            }));
+impl Aggregate for Counter {
+    type Id = String;
+    type Event = CounterEvent;
+    fn aggregate_type() -> &'static str { "counter" }
+    async fn apply(&mut self, event: &CounterEvent) {
+        match event {
+            CounterEvent::Added { amount } => self.value += amount,
+            CounterEvent::Reset => self.value = 0,
         }
-
-        Ok(vec![GameEvent::PlayerAttacked {
-            attacker: self.attacker.clone(),
-        }])
     }
 }
 ```
 
-Event payloads remain pure domain events; aggregate identity and infrastructure metadata live in `StoredEvent`.
+**`Aggregate::Event` is the aggregate's entire event family, usually an enum—not
+one individual kind of event.** `CounterEvent` groups the different facts that can
+change a counter. Each variant has its own persisted event kind. The aggregate
+and its projections match on the variants they receive; adding a variant requires
+updating exhaustive matches. A command returns `Vec<CounterEvent>` and may emit
+zero, one or several events, including different variants.
 
-Aggregate IDs are typed at the domain boundary:
+Aggregate state contains domain data. The runtime owns identity and stream
+version; commands do not maintain those fields. State needs Serde only when
+using snapshots. Events always use Serde. Neither state nor events require
+`Clone`; event kinds do not depend on display text.
+
+Choose stable aggregate and event names: they identify persisted history.
+
+### 2. Define a command that enforces your rules
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GameId(String);
+struct Add(u32);
 
-impl std::fmt::Display for GameId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+impl Command for Add {
+    type Aggregate = Counter;
+    async fn handle(&self, state: &Counter) -> Result<Vec<CounterEvent>, CqrsError> {
+        if state.value.checked_add(self.0).is_none() {
+            return Err(CqrsError::domain("counter would overflow"));
+        }
+        Ok(vec![CounterEvent::Added { amount: self.0 }])
     }
 }
 
-impl std::str::FromStr for GameId {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
+struct Reset;
+impl Command for Reset {
+    type Aggregate = Counter;
+    async fn handle(&self, _: &Counter) -> Result<Vec<CounterEvent>, CqrsError> {
+        Ok(vec![CounterEvent::Reset])
     }
-}
-
-impl Aggregate for GameAggregate {
-    type Id = GameId;
-    type Event = GameEvent;
-    // ...
 }
 ```
 
-Different aggregates can use different ID shapes. In the examples:
+Commands inspect recovered state and return facts to persist. For business rule
+failures return `CqrsError::domain(...)`; use `invariant(...)` for request/routing
+preconditions. Avoid irreversible effects in handlers: concurrent appends can
+still reject the command's events.
 
-- `GameAggregate` uses `GameId(String)` (UUID-like string identity).
-- `HotelAggregate` uses `HotelId(u32)` (numeric identity).
-
-You can attach metadata (`command_id`, `correlation_id`, `causation_id`, `actor`, `tenant_id`, custom `extra`) via `EventMetadata` on persisted events.
-
-For application-level error handling, `anyhow` is re-exported:
+### 3. Model the read side with Toasty
 
 ```rust
-async fn main() -> mini_cqrs_es::anyhow::Result<()> {
-    // ...
+#[derive(Debug, toasty::Model)]
+struct CounterView {
+    #[key]
+    id: String,
+    value: u32,
 }
 ```
 
-Please note that, even if there are some ready to use structs (like `SimpleCqrs`, `SimpleAggregateManager`, and `SnapshotAggregateManager`), everything is an implementation of some trait. The `InMemory*` types in the [game example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/game.rs) simulate storage. In real use cases you will build wrappers around your database client or other storage solution — see the [hotel example](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/hotel.rs) for a complete SQLite implementation using `sqlx`.
+Read models can differ completely from aggregate state. A projection may update
+multiple tables. Queries can return models or application DTOs.
 
-## Documentation
+### 4. Define the projection
 
-Code is documented and being improved continuously. For complete implementations, check the
-[examples](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples):
+```rust
+struct CounterProjection;
 
-- **[game](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/game.rs)** — in-memory stores with snapshots
-- **[hotel](https://github.com/andreapavoni/mini_cqrs_es/tree/master/examples/hotel.rs)** — SQLite event store via `sqlx`, with tests covering the full domain lifecycle and event replay consistency
+impl Projection for CounterProjection {
+    type Aggregate = Counter;
+    fn name() -> &'static str { "counter-total" }
 
-## Testing
+    async fn apply(
+        &self,
+        event: &StoredEvent,
+        payload: CounterEvent,
+        executor: &mut dyn toasty::Executor,
+    ) -> Result<(), CqrsError> {
+        let previous = CounterView::filter_by_id(&event.aggregate_id)
+            .first().exec(&mut *executor).await
+            .map_err(|e| CqrsError::storage("load counter view", e))?
+            .map_or(0, |row| row.value);
+        let value = match payload {
+            CounterEvent::Added { amount } => previous.checked_add(amount)
+                .ok_or_else(|| CqrsError::domain("counter read model overflow"))?,
+            CounterEvent::Reset => 0,
+        };
+        CounterView::upsert_by_id(&event.aggregate_id)
+            .value(value).exec(executor).await
+            .map_err(|e| CqrsError::storage("update counter view", e))?;
+        Ok(())
+    }
+}
+```
 
-The hotel example includes integration tests that exercise the full CQRS/ES stack against a real SQLite database:
+Use the supplied executor for every mutation. The `Projector` owns transaction
+and checkpoint handling: it filters unrelated aggregate types, skips duplicates,
+rejects gaps, decodes the event and commits model updates with its checkpoint.
+Do not commit/roll back inside a projection or perform external notifications.
+Keep one ordered writer per projection/stream. A projector is a runner, not a
+background worker.
+
+### 5. Open the databases and wire the runner
+
+```rust
+let events = EventLog::connect(&std::env::var("EVENTS_DATABASE_URL")?).await?;
+let reads = ReadModels::builder()
+    .register::<CounterView>()
+    .connect(&std::env::var("READ_MODELS_DATABASE_URL")?).await?;
+
+// First-time setup only, against fresh provisioned databases:
+events.create_schema().await?;
+reads.create_schema().await?;
+let projector = reads.projector(CounterProjection);
+let cqrs = SimpleCqrs::new(events.clone())
+    .with_consumer(projector.clone());
+
+let id = "counter-1".to_owned();
+let receipt = cqrs.execute(&id, &Add(5), EventMetadata::default()).await?;
+// Another command, another variant of CounterEvent:
+let reset_receipt = cqrs.execute(&id, &Reset, EventMetadata::default()).await?;
+```
+
+Register only your application read models. Event, snapshot and checkpoint
+storage are managed by the library. `connect` performs no DDL; use it during
+ordinary startup. `create_schema` explicitly creates the registered tables and
+indexes in a **fresh database**. It is not an idempotent initializer, schema
+migration tool, or reset operation. Provision PostgreSQL databases yourself;
+for Turso, use fresh file URLs with existing parent directories. Do not call
+`create_schema` every time the application starts.
+
+The runner shares one event store between recovery and append. Add consumers
+with `with_consumer` or `with_consumers`; registration order is preserved.
+Pass metadata when you need command/correlation/actor context. Metadata IDs do
+not implement deduplication, tenant isolation or authorization.
+
+Snapshots are an optional one-line change, before executing commands:
+
+```rust
+let cqrs = cqrs.with_snapshots(events.snapshot_cache());
+```
+
+They use the event database's existing pool. Recovery loads the last saved state
+and replays its newer events. Missing snapshots trigger full replay; corrupt
+snapshots or storage errors return errors. Snapshots are disposable caches, not
+event history. No separate snapshot model or connection is needed.
+
+### 6. Query the read model
+
+Query models directly through `reads.database()`, or define a reusable query:
+
+```rust
+struct GetCounter { database: toasty::Db, id: String }
+
+impl Query for GetCounter {
+    type Output = Result<Option<u32>, CqrsError>;
+    async fn apply(&self) -> Self::Output {
+        CounterView::filter_by_id(&self.id).first()
+            .exec(&mut self.database.clone()).await
+            .map(|row| row.map(|row| row.value))
+            .map_err(|e| CqrsError::storage("query counter", e))
+    }
+}
+
+let value = cqrs.query(&GetCounter { database: reads.database(), id: id.clone() }).await?;
+```
+
+Queries own their data access and error type. There is no generic repository
+layer to implement.
+
+## Failures and recovery
+
+Successful execution returns a receipt with the aggregate ID, committed stream
+version and event IDs. Event persistence and downstream processing are separate:
+
+| `ExecutionError` | Meaning / action |
+| --- | --- |
+| `NotCommitted` | Failure before append, or a version conflict rejecting this append |
+| `CommitUnknown` | Append outcome is uncertain; reconcile history before retrying |
+| `Committed` | Events were appended, but application/projection/snapshot processing failed; inspect the receipt and stage |
+
+A committed failure does **not** mean the command should run again. Once its
+cause is resolved, repair projection delivery with:
+
+```rust
+projector.catch_up(&events, &id).await?;
+```
+
+It resumes that projection's durable checkpoint through one captured event tip.
+Earlier successful deliveries remain applied after a later failure. Operational
+errors preserve their original source in `CqrsError::Storage`. Cancellation gives
+no command outcome, and a commit error can be uncertain. The library does not
+retry commands or promise distributed/exactly-once delivery.
+
+### Rebuild a read database
+
+Pause writers and live projection delivery, then preflight the full bounded
+stream catalog before creating a replacement:
+
+```rust
+let prepared = ReplayPlan::new()
+    .with_aggregate::<Counter>()
+    .prepare(&events).await?;
+let replacement = ReadModels::builder()
+    .register::<CounterView>()
+    .connect(&std::env::var("REBUILD_DATABASE_URL")?).await?;
+replacement.create_schema().await?;
+let projections = EventConsumers::new()
+    .with(replacement.projector(CounterProjection));
+let progress = prepared.run(&projections).await?;
+// Publish the replacement only now; keep writers paused until cutover finishes.
+```
+
+Provision a fresh, separate destination before this operation. Schema creation
+and replay can leave a partial target on failure; discard that target and retry
+with another fresh database. The library neither checks URL equivalence nor
+publishes/replaces databases. Applications must prevent accidental use of active
+targets and coordinate cutover.
+Declare every supported aggregate type and supply matching projection consumers;
+the declarations do not inspect or verify the pipeline's coverage. Multiple
+consumers are not one atomic transaction. `ReplayError` retains the failing
+stream when known, confirmed delivery progress and the original source.
+
+Only event-derived data can be reconstructed. Keep external notifications out
+of replay. Change a projection's logic by rebuilding its output; changing its
+checkpoint name alone does not clear populated model tables.
+
+## Advanced integration
+
+- **Schema ownership:** keep event/support tables separate from read models and
+  checkpoints. `create_schema` is explicit first-time setup; applications own
+  subsequent schema changes and provisioning.
+- **Native Toasty configuration:** use `toasty::Db::builder()` with a model set
+  and `EventLog::new(db)` for custom pools. `EventLog::models()` registers all
+  framework persistence records for that builder. Event/snapshot models live under
+  `persistence`; `ReadModels` registers checkpoints automatically on the default
+  builder. Raw event updates/deletes bypass the log's invariants.
+- **Custom stores/managers:** implement `EventStore`/`SnapshotStore` and use
+  `Arc<YourStore>` to share a non-`Clone` store. `SimpleCqrs::from_parts` supports
+  custom aggregate managers; callers must keep recovery and append on the same
+  event history. Most applications do not need these interfaces.
+- **Event evolution:** `SCHEMA_VERSION` defaults to one and applies to the whole
+  event family. Default decoding validates revision and kind. Override
+  `decode(kind, revision, payload)` for explicit historical upgrades, then call
+  `decode_current` to validate the current variant. History is never rewritten.
+  See [tested upgrade examples](tests/api_workflows.rs). Snapshot state formats
+  evolve independently and may require cache invalidation.
+- **Backend support:** the shared storage, snapshot and projection contracts run
+  against file-backed Turso and PostgreSQL in CI. Backend independence does not
+  remove differences in types, constraints, collation or errors. In Toasty 0.11,
+  a competing PostgreSQL append can surface a unique-constraint failure as a
+  storage error rather than a version conflict; execution conservatively reports
+  an uncertain append outcome. Reconcile history before retrying. No global event
+  order or online rebuild/cutover protocol is provided.
+
+## Examples and verification
+
+Run [the standalone hotel app](examples/hotel/README.md) with an explicit driver:
 
 ```sh
-cargo test --example hotel
-cargo run --example hotel
-cargo run --example game
+cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- init
+cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- create 1 3
+cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- check-in 1 2 Andrea
+cargo run --manifest-path examples/hotel/Cargo.toml --features turso -- show 1
 ```
 
-## Contributing
+The example alone supplies local file URLs when `turso` is enabled. For PostgreSQL,
+select `--features postgresql` and set both `EVENTS_DATABASE_URL` and
+`READ_MODELS_DATABASE_URL` to separate, provisioned PostgreSQL databases.
 
-If you find any bugs or have any suggestions, please [open an issue](https://github.com/andreapavoni/mini_cqrs_es/issues).
+```sh
+cargo test --locked --features turso --all-targets
+cargo fmt --check
+cargo fmt --manifest-path examples/hotel/Cargo.toml --check
+cargo clippy --locked --features turso --all-targets -- -D warnings
+```
 
-## License
+To run the same contracts on PostgreSQL, use **disposable test databases** and
+credentials allowed to create schemas, then run:
 
-This project is open-source and available under the [MIT License](LICENSE).
+```sh
+EVENTS_DATABASE_URL=postgresql://postgres:postgres@localhost/events \
+READ_MODELS_DATABASE_URL=postgresql://postgres:postgres@localhost/read_models \
+cargo test --locked --features postgresql --all-targets
+```
+
+PostgreSQL tests create uniquely named schemas per fixture. They do not clean
+those schemas up; discard the test databases afterward. Both URLs must be set
+together. CI provisions disposable databases, runs both backend suites, and runs
+the complete application including replay into a fresh database. The core is
+also tested and compiled with no driver enabled. `Cargo.lock` is ignored for
+this library; omit `--locked` on the first local resolution.
+
+The project is MIT-licensed.
